@@ -1,5 +1,11 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   Armchair,
   Users,
@@ -51,6 +57,13 @@ import {
   type Guest,
   type Table,
 } from './seating';
+import { expandTable, fitRoom, revealAxis, roomGeometry } from './map-layout';
+import {
+  captureGuestPointer,
+  releaseGuestPointer,
+  watchGuestDrag,
+  type GuestPointer,
+} from './guest-drag';
 const STORAGE_KEY = 'ensulugar-recepcion-v1';
 const initials = (name: string) =>
   name
@@ -77,7 +90,8 @@ export default function Home() {
   const [referenceOpen, setReferenceOpen] = useState(false),
     [helpOpen, setHelpOpen] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null),
-    [dropTarget, setDropTarget] = useState<string | null>(null);
+    [dropTarget, setDropTarget] = useState<string | null>(null),
+    [dropSeat, setDropSeat] = useState<number | null>(null);
   const [focusedTableId, setFocusedTableId] = useState<string | null>(null),
     [focusedGuestId, setFocusedGuestId] = useState<string | null>(null),
     [movingGuestId, setMovingGuestId] = useState<string | null>(null),
@@ -86,25 +100,26 @@ export default function Home() {
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState(true);
   const [zoom, setZoom] = useState(1),
-    [fit, setFit] = useState(0.85),
+    [viewport, setViewport] = useState({ width: 840, height: 680 }),
     [mobilePanel, setMobilePanel] = useState(false),
     [mapOnly, setMapOnly] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const zoomBeforeMapOnly = useRef(1);
-  const pointer = useRef<{
-    id: string;
-    x: number;
-    y: number;
-    moved: boolean;
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const previousView = useRef<{
+    left: number;
+    top: number;
+    scale: number;
+    width: number;
+    height: number;
+    scrollLeft: number;
+    scrollTop: number;
   } | null>(null);
-  const suppressClick = useRef(false);
+  const zoomBeforeMapOnly = useRef(1);
+  const pointer = useRef<GuestPointer | null>(null);
+  const suppressClick = useRef(0);
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
   function startPointer(e: React.PointerEvent, id: string) {
-    // On touch screens, tapping is the reliable way to focus and move guests.
-    // Pointer dragging remains available with a mouse without swallowing taps.
-    if (e.button !== 0 || e.pointerType !== 'mouse') return;
-    suppressClick.current = false;
-    pointer.current = { id, x: e.clientX, y: e.clientY, moved: false };
+    captureGuestPointer(e, e.currentTarget as HTMLElement, id, pointer);
   }
   const active = guests.find((g) => g.id === selectedGuest),
     seated = guests.filter((g) => g.tableId).length,
@@ -114,6 +129,17 @@ export default function Home() {
     focusedOccupants = focusedTable
       ? guests.filter((g) => g.tableId === focusedTable.id)
       : [];
+  const expandedTable = dragging ? undefined : focusedTable;
+  const expandedLayout = expandedTable
+    ? expandTable(expandedTable, guests, viewport)
+    : undefined;
+  const fit = fitRoom(viewport);
+  const scale = fit * zoom;
+  const geometry = roomGeometry(viewport, scale, expandedTable, expandedLayout);
+  const focusLeft = geometry.focus?.left,
+    focusTop = geometry.focus?.top;
+  const focusWidth = geometry.focus?.width,
+    focusHeight = geometry.focus?.height;
   const visibleGuests = guests.filter(
     (g) =>
       normalize(g.name).includes(normalize(query)) &&
@@ -124,6 +150,9 @@ export default function Home() {
     setMovingGuestId(null);
     setDragging(null);
     setDropTarget(null);
+    setDropSeat(null);
+    setFocusedTableId(null);
+    setFocusedGuestId(null);
   }, []);
   const commit = useCallback(
     (next: Guest[]) => {
@@ -137,6 +166,12 @@ export default function Home() {
       const result = moveGuest(guests, id, target, seat);
       if (result.error) {
         setToast(result.error);
+        // A full table needs an explicit seat choice, directly on the same map.
+        if (target && seat === undefined) {
+          setMovingGuestId(id);
+          setFocusedTableId(target);
+          setFocusedGuestId(null);
+        }
         return false;
       }
       if (!result.changed) {
@@ -182,79 +217,128 @@ export default function Home() {
   }, [toast]);
   useEffect(() => {
     if (!canvasRef.current) return;
-    const o = new ResizeObserver((e) =>
-      setFit(
-        Math.min(
-          1.15,
-          Math.max(0.35, (e[0].contentRect.width - 32) / 960),
-          (e[0].contentRect.height - 12) / 760,
-        ),
-      ),
+    const o = new ResizeObserver(([entry]) =>
+      setViewport({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      }),
     );
     o.observe(canvasRef.current);
     return () => o.disconnect();
   }, []);
-  useEffect(() => {
-    function onMove(e: PointerEvent) {
-      const p = pointer.current;
-      if (!p) return;
-      if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6)
-        p.moved = true;
-      if (!p.moved) return;
-      e.preventDefault();
-      setMovingGuestId(p.id);
-      setFocusedTableId(null);
-      setFocusedGuestId(null);
-      setTableDetailsOpen(false);
-      setMobilePanel(false);
-      setDragging(p.id);
-      setDragPosition({ x: e.clientX, y: e.clientY });
-      const target = document
-        .elementFromPoint(e.clientX, e.clientY)
-        ?.closest<HTMLElement>('[data-table-id]');
-      setDropTarget(target?.dataset.tableId ?? null);
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const previous = previousView.current;
+    // Preserve the camera's map coordinate while its scale or padding changes.
+    const centerX = previous
+      ? (previous.scrollLeft + previous.width / 2 - previous.left) /
+        previous.scale
+      : 480;
+    const centerY = previous
+      ? (previous.scrollTop + previous.height / 2 - previous.top) /
+        previous.scale
+      : 380;
+    let left = geometry.left + centerX * scale - viewport.width / 2;
+    let top = geometry.top + centerY * scale - viewport.height / 2;
+    if (
+      focusLeft !== undefined &&
+      focusTop !== undefined &&
+      focusWidth !== undefined &&
+      focusHeight !== undefined
+    ) {
+      left = revealAxis(
+        left,
+        focusLeft,
+        focusWidth,
+        viewport.width,
+        geometry.width,
+      );
+      top = revealAxis(
+        top,
+        focusTop,
+        focusHeight,
+        viewport.height,
+        geometry.height,
+      );
     }
-    function onUp(e: PointerEvent) {
-      const p = pointer.current;
-      pointer.current = null;
-      if (p?.moved) {
-        suppressClick.current = true;
-        window.setTimeout(() => {
-          suppressClick.current = false;
-        }, 0);
-        const target = document
-          .elementFromPoint(e.clientX, e.clientY)
-          ?.closest<HTMLElement>('[data-table-id]');
-        if (target) {
-          const id = target.dataset.tableId!;
-          assign(
-            p.id,
-            id === 'none' ? null : id,
-            target.dataset.seatIndex === undefined
-              ? undefined
-              : Number(target.dataset.seatIndex),
-          );
-        }
-      }
-      setDragging(null);
-      setDropTarget(null);
-    }
-    function cancel() {
-      pointer.current = null;
-      setDragging(null);
-      setDropTarget(null);
-    }
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', cancel);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', cancel);
+    scroller.scrollLeft = left;
+    scroller.scrollTop = top;
+    previousView.current = {
+      left: geometry.left,
+      top: geometry.top,
+      scale,
+      width: viewport.width,
+      height: viewport.height,
+      scrollLeft: scroller.scrollLeft,
+      scrollTop: scroller.scrollTop,
     };
-  }, [assign]);
+  }, [
+    geometry.width,
+    geometry.height,
+    geometry.left,
+    geometry.top,
+    focusLeft,
+    focusTop,
+    focusWidth,
+    focusHeight,
+    scale,
+    viewport.width,
+    viewport.height,
+  ]);
+  useEffect(
+    () =>
+      watchGuestDrag({
+        pointer,
+        scroller: scrollerRef,
+        suppressClick,
+        start(id) {
+          setMovingGuestId(id);
+          setFocusedTableId(null);
+          setFocusedGuestId(null);
+          setTableDetailsOpen(false);
+          setMobilePanel(false);
+          setDragging(id);
+        },
+        position: setDragPosition,
+        target(tableId, seat) {
+          setDropTarget(tableId);
+          setDropSeat(seat);
+        },
+        drop: assign,
+        outside() {
+          setMovingGuestId(null);
+          setToast('Movimiento cancelado. Suelta sobre una mesa o un asiento.');
+        },
+        end() {
+          setDragging(null);
+          setDropTarget(null);
+          setDropSeat(null);
+        },
+        cancel: cancelMove,
+      }),
+    [assign, cancelMove],
+  );
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (
+        e.key === 'Escape' &&
+        !e.defaultPrevented &&
+        !tableDetailsOpen &&
+        !selectedGuest &&
+        !helpOpen &&
+        !referenceOpen
+      ) {
+        releaseGuestPointer(pointer);
+        cancelMove();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cancelMove, tableDetailsOpen, selectedGuest, helpOpen, referenceOpen]);
   function undo() {
     if (!history.length) return;
+    releaseGuestPointer(pointer);
     setGuests(history[history.length - 1]);
     setHistory(history.slice(0, -1));
     cancelMove();
@@ -296,10 +380,6 @@ export default function Home() {
     setMapOnly(true);
   }
   function handleGuestClick(g: Guest) {
-    if (suppressClick.current) {
-      suppressClick.current = false;
-      return;
-    }
     if (movingGuestId && g.tableId) {
       assign(movingGuestId, g.tableId, g.seat ?? undefined);
     } else if (g.tableId) focusTable(g.tableId, g.id);
@@ -337,6 +417,8 @@ export default function Home() {
     setDropTarget(null);
   }
   function renderTable(table: Table) {
+    const expanded = expandedTable?.id === table.id;
+    const layout = expanded ? expandedLayout : undefined;
     const occupants = guests.filter((g) => g.tableId === table.id),
       highlighted = occupants.some(
         (g) => query && normalize(g.name).includes(normalize(query)),
@@ -345,9 +427,21 @@ export default function Home() {
       <div
         key={table.id}
         data-table-id={table.id}
-        aria-hidden={focusedTableId && !movingGuestId ? true : undefined}
-        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${selectedTable === table.id ? 'is-selected' : ''} ${focusedTableId === table.id ? 'is-focus-source' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''}`}
-        style={{ left: table.x, top: table.y }}
+        inert={!!expandedTable && !expanded}
+        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${selectedTable === table.id ? 'is-selected' : ''} ${expanded ? 'is-expanded' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''}`}
+        style={
+          {
+            left: table.x,
+            top: table.y,
+            ...(layout
+              ? {
+                  width: layout.width,
+                  height: layout.height,
+                  '--name-scale': 1 / scale,
+                }
+              : {}),
+          } as React.CSSProperties
+        }
         onDragOver={(e) => {
           e.preventDefault();
           setDropTarget(table.id);
@@ -358,8 +452,40 @@ export default function Home() {
         }}
         onDrop={(e) => handleDrop(e, table.id)}
       >
+        {layout && (
+          <svg
+            className="seat-connectors"
+            width={layout.width}
+            height={layout.height}
+            aria-hidden="true"
+          >
+            {layout.seats.map((seat, index) => (
+              <line
+                key={index}
+                x1={Math.max(
+                  layout.surface.left,
+                  Math.min(
+                    seat.left + seat.width / 2,
+                    layout.surface.left + layout.surface.width,
+                  ),
+                )}
+                y1={Math.max(
+                  layout.surface.top,
+                  Math.min(
+                    seat.top + seat.height / 2,
+                    layout.surface.top + layout.surface.height,
+                  ),
+                )}
+                x2={seat.left + seat.width / 2}
+                y2={seat.top + seat.height / 2}
+              />
+            ))}
+          </svg>
+        )}
         <button
           className="table-touch-target"
+          tabIndex={-1}
+          aria-hidden="true"
           aria-label={`Seleccionar ${table.name}`}
           onClick={() => {
             if (movingGuestId) assign(movingGuestId, table.id);
@@ -368,9 +494,12 @@ export default function Home() {
         />
         <button
           className="table-surface"
-          aria-label={`${table.name}, ${occupants.length} de ${table.capacity} lugares. Ver invitados`}
+          style={layout?.surface}
+          aria-expanded={expanded}
+          aria-label={`${table.name}, ${occupants.length} de ${table.capacity} lugares. ${expanded ? 'Editar lugares' : 'Ver invitados'}`}
           onClick={() => {
             if (movingGuestId) assign(movingGuestId, table.id);
+            else if (expanded) setTableDetailsOpen(true);
             else focusTable(table.id);
           }}
         >
@@ -388,6 +517,7 @@ export default function Home() {
           {table.id !== 'couple' && occupants.length === 0 && (
             <Plus size={14} />
           )}
+          {expanded && <Pencil size={14} className="table-edit-hint" />}
         </button>
         {Array.from({ length: table.capacity }, (_, seat) => {
           const guest = occupants.find((g) => g.seat === seat),
@@ -407,13 +537,25 @@ export default function Home() {
               key={seat}
               data-table-id={table.id}
               data-seat-index={seat}
+              data-guest-id={guest?.id}
               onPointerDown={(e) => {
-                if (guest && !movingGuestId) startPointer(e, guest.id);
+                if (
+                  guest &&
+                  (!movingGuestId || movingGuestId === guest.id) &&
+                  (expanded || e.pointerType === 'mouse')
+                )
+                  startPointer(e, guest.id);
               }}
-              className={`seat ${side} ${guest ? 'occupied' : 'vacant'} ${guest && query && normalize(guest.name).includes(normalize(query)) ? 'search-match' : ''} ${dragging === guest?.id ? 'is-dragging' : ''} ${movingGuestId === guest?.id ? 'move-origin' : ''}`}
+              onContextMenu={(e) => {
+                if (expanded && guest) e.preventDefault();
+              }}
+              className={`seat ${side} ${guest ? 'occupied' : 'vacant'} ${guest && query && normalize(guest.name).includes(normalize(query)) ? 'search-match' : ''} ${dragging === guest?.id ? 'is-dragging' : ''} ${movingGuestId === guest?.id ? 'move-origin' : ''} ${expanded && guest?.id === focusedGuestId ? 'is-current' : ''} ${dropTarget === table.id && dropSeat === seat ? 'is-drop-seat' : ''}`}
               style={
                 {
                   '--seat-index': table.id === 'couple' ? seat : index,
+                  ...(layout
+                    ? { ...layout.seats[seat], right: 'auto', bottom: 'auto' }
+                    : {}),
                 } as React.CSSProperties
               }
               title={
@@ -423,7 +565,7 @@ export default function Home() {
               }
               aria-label={
                 guest
-                  ? `${guest.name}, ${table.name}, lugar ${seat + 1}. Editar o mover`
+                  ? `${guest.name}, ${table.name}, lugar ${seat + 1}. ${expanded ? 'Arrastrar o tocar para mover' : 'Ver nombres de la mesa'}`
                   : `${table.name}, lugar ${seat + 1} disponible`
               }
               draggable={false}
@@ -440,19 +582,23 @@ export default function Home() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleDrop(e, table.id, seat)}
               onClick={() => {
-                if (suppressClick.current) {
-                  suppressClick.current = false;
-                  return;
-                }
                 if (movingGuestId) assign(movingGuestId, table.id, seat);
+                else if (expanded && guest) beginMove(guest.id);
+                else if (expanded) setToast('Este lugar está disponible.');
                 else focusTable(table.id, guest?.id ?? null);
               }}
             >
-              {guest ? initials(guest.name) : <Plus size={12} />}
+              {expanded ? (
+                <span className="seat-name">{guest?.name ?? 'Disponible'}</span>
+              ) : guest ? (
+                initials(guest.name)
+              ) : (
+                <Plus size={12} />
+              )}
             </button>
           );
         })}
-        {table.id === 'couple' && (
+        {table.id === 'couple' && !expanded && (
           <span className="couple-label">Mesa de la pareja</span>
         )}
       </div>
@@ -660,16 +806,30 @@ export default function Home() {
           </div>
         </aside>
         <section
-          className="plan-panel"
+          className={`plan-panel ${expandedTable ? 'has-expanded-table' : ''}`}
           aria-label="Plano interactivo del salón"
         >
           <div className="plan-toolbar">
             <div className="plan-title">
               <LayoutGrid size={18} />
-              <h2>Plano del salón</h2>
-              <span className="subtle-badge">Según tu foto</span>
+              <h2>{expandedTable?.name ?? 'Plano del salón'}</h2>
+              {!expandedTable && (
+                <span className="subtle-badge">Según tu foto</span>
+              )}
             </div>
             <div className="plan-actions">
+              {expandedTable && (
+                <button
+                  className="icon-button focus-dismiss"
+                  aria-label="Cerrar nombres de la mesa"
+                  onClick={() => {
+                    setFocusedTableId(null);
+                    setFocusedGuestId(null);
+                  }}
+                >
+                  <X size={19} />
+                </button>
+              )}
               <button
                 className="button text-button undo-button"
                 disabled={!history.length}
@@ -708,7 +868,7 @@ export default function Home() {
             </span>
             <span className="table-count">10 mesas + pareja</span>
           </div>
-          {movingGuest && (
+          {movingGuest && !dragging && (
             <output className="move-banner">
               <span
                 className={`avatar tone-${Number(movingGuest.id.slice(1)) % 4}`}
@@ -718,7 +878,11 @@ export default function Home() {
               <span className="move-banner-copy">
                 <small>MOVIENDO A</small>
                 <strong>{movingGuest.name}</strong>
-                <span>Toca otra mesa o un asiento para ubicarlo.</span>
+                <span>
+                  {expandedTable
+                    ? 'Toca un nombre para intercambiar sus lugares.'
+                    : 'Toca otra mesa o un asiento para ubicarlo.'}
+                </span>
               </span>
               <button onClick={cancelMove} aria-label="Cancelar movimiento">
                 <X size={18} />
@@ -737,14 +901,27 @@ export default function Home() {
             className={`canvas-viewport ${dragging || movingGuest ? 'is-moving move-mode' : ''}`}
             ref={canvasRef}
           >
-            <div className="canvas-scroller">
+            <div
+              className="canvas-scroller"
+              ref={scrollerRef}
+              onScroll={(e) => {
+                if (previousView.current) {
+                  previousView.current.scrollLeft = e.currentTarget.scrollLeft;
+                  previousView.current.scrollTop = e.currentTarget.scrollTop;
+                }
+              }}
+            >
               <div
                 className="map-scroll-area"
-                style={{ width: 960 * fit * zoom, height: 760 * fit * zoom }}
+                style={{ width: geometry.width, height: geometry.height }}
               >
                 <div
-                  className={`floor-map ${focusedTable && !movingGuest ? 'has-table-focus' : ''}`}
-                  style={{ transform: `scale(${fit * zoom})` }}
+                  className={`floor-map ${expandedTable ? 'has-table-focus' : ''}`}
+                  style={{
+                    left: geometry.left,
+                    top: geometry.top,
+                    transform: `scale(${scale})`,
+                  }}
                 >
                   <div className="map-compass">
                     <MapPin size={15} />
@@ -792,182 +969,50 @@ export default function Home() {
                   <div className="open-floor-label">
                     Un espacio para celebrar
                   </div>
-                  {tables.map(renderTable)}
-                </div>
-              </div>
-            </div>
-            {focusedTable && !movingGuest && (
-              <div className="map-focus-layer">
-                <button
-                  className="map-focus-dimmer"
-                  aria-label="Cerrar mesa enfocada"
-                  onClick={() => {
-                    setFocusedTableId(null);
-                    setFocusedGuestId(null);
-                  }}
-                />
-                <section
-                  className="map-table-focus"
-                  data-edge-x={
-                    focusedTable.x < 320
-                      ? 'left'
-                      : focusedTable.x > 680
-                        ? 'right'
-                        : 'center'
-                  }
-                  data-edge-y={
-                    focusedTable.y < 220
-                      ? 'top'
-                      : focusedTable.y > 560
-                        ? 'bottom'
-                        : 'center'
-                  }
-                  aria-labelledby="focused-table-title"
-                >
-                  <header className="table-focus-header">
-                    <div>
-                      <span className="focus-kicker">MESA EN FOCO</span>
-                      <h2 id="focused-table-title">{focusedTable.name}</h2>
-                      <p>
-                        {focusedOccupants.length} de {focusedTable.capacity}{' '}
-                        lugares ocupados
-                      </p>
-                    </div>
+                  {expandedTable && (
                     <button
-                      className="focus-close"
-                      aria-label="Cerrar mesa enfocada"
+                      className="map-focus-dimmer"
+                      aria-label="Cerrar nombres de la mesa"
+                      style={{
+                        left: -geometry.left / scale,
+                        top: -geometry.top / scale,
+                        width: geometry.width / scale,
+                        height: geometry.height / scale,
+                      }}
                       onClick={() => {
                         setFocusedTableId(null);
                         setFocusedGuestId(null);
                       }}
-                    >
-                      <X size={20} />
-                    </button>
-                  </header>
-                  <div className="focus-table-layout">
-                    <div className="focus-seat-column">
-                      {Array.from(
-                        {
-                          length: Math.ceil(focusedTable.capacity / 2),
-                        },
-                        (_, seat) => {
-                          const guest = focusedOccupants.find(
-                            (g) => g.seat === seat,
-                          );
-                          return (
-                            <button
-                              key={seat}
-                              className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
-                              onPointerDown={(e) => {
-                                if (guest) startPointer(e, guest.id);
-                              }}
-                              onClick={() => {
-                                if (suppressClick.current) {
-                                  suppressClick.current = false;
-                                  return;
-                                }
-                                if (guest) beginMove(guest.id);
-                                else setToast('Este lugar está disponible.');
-                              }}
-                            >
-                              <span className="focus-seat-number">
-                                {String(seat + 1).padStart(2, '0')}
-                              </span>
-                              <span className="focus-seat-name">
-                                {guest?.name ?? 'Disponible'}
-                              </span>
-                              {guest ? (
-                                <GripVertical size={15} />
-                              ) : (
-                                <Plus size={15} />
-                              )}
-                            </button>
-                          );
-                        },
-                      )}
-                    </div>
-                    <button
-                      className={`focus-table-core ${focusedTable.id === 'couple' ? 'couple' : ''}`}
-                      onClick={() => setTableDetailsOpen(true)}
-                      aria-label={`Editar lugares de ${focusedTable.name}`}
-                    >
-                      {focusedTable.id === 'couple' ? (
-                        <Heart size={28} />
-                      ) : (
-                        <span>{focusedTable.name.replace('Mesa ', '')}</span>
-                      )}
-                      <strong>{focusedTable.name}</strong>
-                      <small>Toca para editar sus lugares</small>
-                    </button>
-                    <div className="focus-seat-column">
-                      {Array.from(
-                        {
-                          length: Math.floor(focusedTable.capacity / 2),
-                        },
-                        (_, index) => {
-                          const seat =
-                            index + Math.ceil(focusedTable.capacity / 2);
-                          const guest = focusedOccupants.find(
-                            (g) => g.seat === seat,
-                          );
-                          return (
-                            <button
-                              key={seat}
-                              className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
-                              onPointerDown={(e) => {
-                                if (guest) startPointer(e, guest.id);
-                              }}
-                              onClick={() => {
-                                if (suppressClick.current) {
-                                  suppressClick.current = false;
-                                  return;
-                                }
-                                if (guest) beginMove(guest.id);
-                                else setToast('Este lugar está disponible.');
-                              }}
-                            >
-                              <span className="focus-seat-number">
-                                {String(seat + 1).padStart(2, '0')}
-                              </span>
-                              <span className="focus-seat-name">
-                                {guest?.name ?? 'Disponible'}
-                              </span>
-                              {guest ? (
-                                <GripVertical size={15} />
-                              ) : (
-                                <Plus size={15} />
-                              )}
-                            </button>
-                          );
-                        },
-                      )}
-                    </div>
-                  </div>
-                  <div className="table-focus-tip">
-                    <ArrowLeftRight size={17} />
-                    <span>
-                      Toca un nombre para moverlo o arrástralo a otro lugar.
-                    </span>
-                  </div>
-                </section>
+                    />
+                  )}
+                  {tables.map(renderTable)}
+                </div>
               </div>
-            )}
+            </div>
           </div>
           <div className="canvas-bottom">
-            <div className="legend">
-              <span>
-                <i className="legend-seat assigned" />
-                Ocupado
+            {expandedTable ? (
+              <span className="map-instruction">
+                {movingGuest
+                  ? 'Toca un asiento para ubicarlo.'
+                  : 'Arrastra un nombre hacia otra mesa.'}
               </span>
-              <span>
-                <i className="legend-seat" />
-                Disponible
-              </span>
-              <span className="column-legend">
-                <i className="legend-column" />
-                Columna fija
-              </span>
-            </div>
+            ) : (
+              <div className="legend">
+                <span>
+                  <i className="legend-seat assigned" />
+                  Ocupado
+                </span>
+                <span>
+                  <i className="legend-seat" />
+                  Disponible
+                </span>
+                <span className="column-legend">
+                  <i className="legend-column" />
+                  Columna fija
+                </span>
+              </div>
+            )}
             <div className="zoom-control">
               <button
                 aria-label="Alejar plano"
@@ -998,7 +1043,8 @@ export default function Home() {
       <footer className="workspace-footer">
         <span>
           <GripVertical size={15} />
-          Toca una mesa para enfocarla; toca un nombre para moverlo.
+          Toca una inicial para ver los nombres; arrastra un nombre para
+          moverlo.
         </span>
         <span>
           <Heart size={13} />
@@ -1008,10 +1054,19 @@ export default function Home() {
       {dragging && (
         <div
           className="drag-preview"
-          style={{ left: dragPosition.x + 15, top: dragPosition.y + 15 }}
+          style={{ left: dragPosition.x, top: dragPosition.y - 24 }}
         >
           <GripVertical size={16} />
-          {guests.find((g) => g.id === dragging)?.name}
+          <span>
+            {guests.find((g) => g.id === dragging)?.name}
+            <small>
+              {dropTarget
+                ? dropSeat !== null
+                  ? `Lugar ${dropSeat + 1} · ${tableName(dropTarget)}`
+                  : tableName(dropTarget)
+                : 'Arrastra hacia una mesa'}
+            </small>
+          </span>
         </div>
       )}
       {toast && (

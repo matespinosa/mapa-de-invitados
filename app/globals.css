@@ -2231,7 +2231,7 @@ h1 > span {
   color: #807487;
 }
 
-/* Keep the focused table inside the visible plan at every screen size. */
+/* The map camera pans as a unit; seats expand on their original table. */
 .canvas-viewport {
   position: relative;
   display: block;
@@ -2239,152 +2239,135 @@ h1 > span {
   padding: 0;
 }
 .canvas-scroller {
-  width: 100%;
-  height: 100%;
-  overflow: auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: 12px 16px 4px;
-  scrollbar-width: thin;
-  scrollbar-color: #d5c2e0 transparent;
-  touch-action: pan-x pan-y;
-}
-.map-focus-layer {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  overflow: auto;
+  padding: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #d5c2e0 transparent;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+.map-scroll-area {
+  position: relative;
+  margin: 0;
+  min-width: 0;
   overflow: hidden;
-  pointer-events: none;
 }
 .map-focus-dimmer {
   position: absolute;
-  inset: 0;
   z-index: 30;
-  width: 100%;
-  height: 100%;
   border: 0;
-  background: #211a2670;
-  backdrop-filter: blur(2px) saturate(0.72);
+  padding: 0;
+  background: #211a266b;
+  backdrop-filter: blur(1px) saturate(0.8);
   cursor: default;
-  pointer-events: auto;
-  animation: map-focus-fade 0.18s ease-out;
+  animation: map-focus-fade 160ms ease-out;
 }
-.map-table-focus {
-  --focus-x: -50%;
-  --focus-y: -50%;
-  position: absolute;
-  left: 50%;
-  top: 50%;
+.table-group.is-expanded {
   z-index: 40;
-  width: min(560px, calc(100% - 24px));
-  max-height: calc(100% - 24px);
-  overflow: auto;
-  padding: 15px;
-  border: 1px solid #ffffff42;
-  border-radius: 20px;
-  background: #3a2b40cc;
-  color: #fff;
+  transform: translate(-50%, -50%) scale(var(--name-scale));
+  transform-origin: center;
+}
+.table-group.is-expanded .table-touch-target {
+  display: none;
+}
+.seat-connectors {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  stroke: #ede0f6;
+  stroke-width: 2;
+}
+.table-group.is-expanded .table-surface {
+  right: auto;
+  bottom: auto;
+  gap: 6px;
+  border: 2px solid #aa82bd;
+  border-radius: 12px;
+  background: #ecdef4;
   box-shadow:
-    0 24px 75px #160d1d52,
-    inset 0 0 0 1px #ffffff17;
-  backdrop-filter: blur(10px);
-  pointer-events: auto;
-  transform: translate(var(--focus-x), var(--focus-y));
-  animation: map-focus-fade 0.2s ease-out;
+    inset 0 0 0 4px #fff8,
+    0 5px 24px #29143030;
 }
-.map-table-focus[data-edge-x='left'] {
-  left: 12px;
-  --focus-x: 0;
+.table-group.is-expanded .table-number {
+  font-size: 24px;
 }
-.map-table-focus[data-edge-x='right'] {
-  right: 12px;
-  left: auto;
-  --focus-x: 0;
-}
-.map-table-focus[data-edge-y='top'] {
-  top: 12px;
-  --focus-y: 0;
-}
-.map-table-focus[data-edge-y='bottom'] {
-  top: auto;
-  bottom: 12px;
-  --focus-y: 0;
-}
-.map-table-focus .table-focus-header {
-  padding: 2px 2px 13px;
-  border-color: #ffffff29;
-}
-.map-table-focus .focus-kicker {
-  color: #e1cce8;
-  font-size: 10px;
-}
-.map-table-focus .table-focus-header h2 {
-  margin-top: 3px;
-  color: #fff;
-  font-size: 22px;
-}
-.map-table-focus .table-focus-header p {
-  color: #e3d7e7;
+.table-group.is-expanded .table-occupancy {
   font-size: 13px;
+  color: #78528b;
 }
-.map-table-focus .focus-close {
-  background: #ffffff1f;
-  color: #fff;
+.table-edit-hint {
+  color: #795189;
 }
-.map-table-focus .focus-close:hover {
-  background: #ffffff32;
+.table-group.is-expanded .seat {
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1.5px solid #d9c3e5;
+  border-radius: 10px;
+  background: #fff;
+  color: #483250;
+  box-shadow: 0 4px 14px #1f0f2c29;
+  transform: none;
+  transition:
+    background 160ms,
+    border-color 160ms,
+    box-shadow 160ms;
+  animation: map-focus-fade 160ms ease-out;
 }
-.map-table-focus .focus-table-layout {
-  grid-template-columns: minmax(0, 1fr) 128px minmax(0, 1fr);
-  gap: 10px;
-  padding: 13px 0 11px;
-}
-.map-table-focus .focus-seat-column {
-  gap: 7px;
-}
-.map-table-focus .focus-seat {
-  min-height: 49px;
-  border-color: #e7dce9;
-  background: #fffdfdfa;
-  box-shadow: 0 5px 16px #21142921;
-  touch-action: manipulation;
-}
-.map-table-focus .focus-seat:hover,
-.map-table-focus .focus-seat.is-current {
-  border-color: #be91ca;
-  background: #f5eaf8;
-  box-shadow: 0 0 0 3px #d8b7e34d;
-}
-.map-table-focus .focus-seat-name {
-  overflow: visible;
-  color: #4f3b56;
+.table-group.is-expanded .seat-name {
   font-size: 14px;
-  line-height: 1.18;
-  text-overflow: clip;
+  line-height: 18px;
+  font-weight: 550;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.map-table-focus .focus-table-core {
-  min-height: 100%;
-  border-color: #d9bedf;
-  background: linear-gradient(145deg, #f0e1f4, #ddc6e7);
-  box-shadow:
-    inset 0 0 0 5px #ffffff62,
-    0 8px 24px #170c1f38;
+.table-group.is-expanded .seat.vacant {
+  border-style: dashed;
+  background: #f8f3fc;
+  color: #877391;
 }
-.map-table-focus .focus-table-core > strong {
-  font-size: 14px;
+.table-group.is-expanded .seat.is-current,
+.table-group.is-expanded .seat:focus-visible {
+  border-color: #84529b;
+  background: #f1e5f8;
+  box-shadow: 0 0 0 3px #ccb0dc88;
 }
-.map-table-focus .focus-table-core > small {
-  color: #856790;
-  font-size: 11px;
+.seat.occupied {
+  touch-action: manipulation;
 }
-.map-table-focus .table-focus-tip {
-  border: 1px solid #ffffff21;
-  background: #20152673;
-  color: #f0e4f3;
+.table-group.is-expanded .seat.occupied {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+.seat.is-drop-seat {
+  background: #79458f;
+  color: white;
+  box-shadow: 0 0 0 7px #aa83c577;
+  border-color: #603474;
+}
+.drag-preview {
+  transform: translate(-50%, -100%);
+  max-width: min(240px, calc(100vw - 24px));
+  white-space: normal;
+}
+.drag-preview small {
+  display: block;
+  margin-top: 4px;
   font-size: 12px;
+  color: #efdef7;
+}
+.map-instruction {
+  color: #775783;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 260px;
+  margin-right: 12px;
+}
+.focus-dismiss {
+  background: #eee3f4;
+  color: #704584;
 }
 @keyframes map-focus-fade {
   from {
@@ -2396,6 +2379,13 @@ h1 > span {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+}
+.plan-title {
+  min-width: 0;
+}
+.has-expanded-table .plan-title > svg {
+  display: none;
 }
 .table-touch-target {
   display: none;
@@ -2464,8 +2454,7 @@ h1 > span {
 
 @media (max-width: 800px) {
   .canvas-scroller {
-    align-items: center;
-    padding: 10px 12px;
+    padding: 0;
   }
   .table-touch-target {
     display: block;
@@ -2482,105 +2471,6 @@ h1 > span {
   .focus-seat {
     touch-action: manipulation;
   }
-  .map-table-focus,
-  .map-table-focus[data-edge-x='left'],
-  .map-table-focus[data-edge-x='right'] {
-    right: 8px;
-    left: 8px;
-    width: auto;
-    max-height: calc(100% - 16px);
-    padding: 10px;
-    border-radius: 16px;
-    --focus-x: 0;
-  }
-  .map-table-focus[data-edge-y='top'] {
-    top: 8px;
-    bottom: auto;
-    --focus-y: 0;
-  }
-  .map-table-focus[data-edge-y='bottom'] {
-    top: auto;
-    bottom: 8px;
-    --focus-y: 0;
-  }
-  .map-table-focus[data-edge-y='center'] {
-    top: 50%;
-    bottom: auto;
-    --focus-y: -50%;
-  }
-  .map-table-focus .table-focus-header {
-    padding: 0 1px 7px;
-  }
-  .map-table-focus .focus-kicker {
-    font-size: 9px;
-  }
-  .map-table-focus .table-focus-header h2 {
-    margin-top: 1px;
-    font-size: 18px;
-  }
-  .map-table-focus .table-focus-header p {
-    display: none;
-  }
-  .map-table-focus .focus-close {
-    width: 34px;
-    height: 34px;
-  }
-  .map-table-focus .focus-table-layout {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
-    padding: 7px 0;
-  }
-  .map-table-focus .focus-table-core {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    min-height: 52px;
-    padding: 6px 9px;
-    border-radius: 12px;
-    flex-direction: row;
-  }
-  .map-table-focus .focus-table-core > span {
-    font-size: 22px;
-  }
-  .map-table-focus .focus-table-core > small {
-    display: none;
-  }
-  .map-table-focus .focus-seat-column {
-    gap: 4px;
-  }
-  .map-table-focus .focus-seat-column:first-child {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .map-table-focus .focus-seat-column:nth-child(3) {
-    grid-column: 2;
-    grid-row: 2;
-  }
-  .map-table-focus .focus-seat {
-    grid-template-columns: 22px minmax(0, 1fr);
-    min-height: 36px;
-    gap: 5px;
-    padding: 4px 6px;
-    border-radius: 8px;
-    box-shadow: 0 3px 10px #2114291c;
-  }
-  .map-table-focus .focus-seat > svg {
-    display: none;
-  }
-  .map-table-focus .focus-seat-number {
-    width: 22px;
-    height: 22px;
-    font-size: 9px;
-  }
-  .map-table-focus .focus-seat-name {
-    font-size: 12px;
-    line-height: 1.1;
-  }
-  .map-table-focus .table-focus-tip {
-    gap: 6px;
-    padding: 7px 9px;
-    font-size: 11px;
-    line-height: 1.25;
-  }
   .plan-toolbar {
     gap: 8px;
     padding: 10px 12px;
@@ -2590,6 +2480,8 @@ h1 > span {
   }
   .plan-title h2 {
     font-size: 14px;
+    max-width: 132px;
+    line-height: 1.2;
   }
   .plan-actions {
     gap: 3px;
@@ -2613,5 +2505,8 @@ h1 > span {
   }
   .map-only .canvas-bottom {
     height: 50px;
+  }
+  .map-instruction {
+    font-size: 12px;
   }
 }
