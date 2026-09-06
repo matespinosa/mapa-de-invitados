@@ -2230,3 +2230,189 @@ h1 > span {
 .save-status {
   color: #807487;
 }
+
+/* Keep table context inside the plan while revealing every full name. */
+.map-focus-dimmer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #211a2670;
+  backdrop-filter: blur(2px) saturate(0.72);
+  cursor: default;
+  animation: map-focus-fade 0.18s ease-out;
+}
+.map-table-focus {
+  --focus-x: -50%;
+  --focus-y: -50%;
+  --focus-scale: 1;
+  position: absolute;
+  z-index: 40;
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(590px, calc(100dvh - 150px));
+  overflow: auto;
+  padding: 15px;
+  border: 1px solid #ffffff42;
+  border-radius: 20px;
+  background: #3a2b406b;
+  color: #fff;
+  box-shadow:
+    0 24px 75px #160d1d52,
+    inset 0 0 0 1px #ffffff17;
+  backdrop-filter: blur(8px);
+  transform: scale(var(--focus-scale)) translate(var(--focus-x), var(--focus-y));
+  transform-origin: top left;
+  animation: map-focus-fade 0.2s ease-out;
+}
+.map-table-focus[data-edge-x='left'] {
+  --focus-x: -44%;
+}
+.map-table-focus[data-edge-x='right'] {
+  --focus-x: -56%;
+}
+.map-table-focus[data-edge-y='top'] {
+  --focus-y: -18%;
+}
+.map-table-focus[data-edge-y='bottom'] {
+  --focus-y: -82%;
+}
+.map-table-focus .table-focus-header {
+  padding: 2px 2px 13px;
+  border-color: #ffffff29;
+}
+.map-table-focus .focus-kicker {
+  color: #e1cce8;
+  font-size: 10px;
+}
+.map-table-focus .table-focus-header h2 {
+  margin-top: 3px;
+  color: #fff;
+  font-size: 22px;
+}
+.map-table-focus .table-focus-header p {
+  color: #e3d7e7;
+  font-size: 13px;
+}
+.map-table-focus .focus-close {
+  background: #ffffff1f;
+  color: #fff;
+}
+.map-table-focus .focus-close:hover {
+  background: #ffffff32;
+}
+.map-table-focus .focus-table-layout {
+  grid-template-columns: minmax(0, 1fr) 128px minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 0 11px;
+}
+.map-table-focus .focus-seat-column {
+  gap: 7px;
+}
+.map-table-focus .focus-seat {
+  min-height: 49px;
+  border-color: #e7dce9;
+  background: #fffdfdfa;
+  box-shadow: 0 5px 16px #21142921;
+}
+.map-table-focus .focus-seat:hover,
+.map-table-focus .focus-seat.is-current {
+  border-color: #be91ca;
+  background: #f5eaf8;
+  box-shadow: 0 0 0 3px #d8b7e34d;
+}
+.map-table-focus .focus-seat-name {
+  overflow: visible;
+  color: #4f3b56;
+  font-size: 14px;
+  line-height: 1.18;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.map-table-focus .focus-table-core {
+  min-height: 100%;
+  border-color: #d9bedf;
+  background: linear-gradient(145deg, #f0e1f4, #ddc6e7);
+  box-shadow:
+    inset 0 0 0 5px #ffffff62,
+    0 8px 24px #170c1f38;
+}
+.map-table-focus .focus-table-core > strong {
+  font-size: 14px;
+}
+.map-table-focus .focus-table-core > small {
+  color: #856790;
+  font-size: 11px;
+}
+.map-table-focus .table-focus-tip {
+  border: 1px solid #ffffff21;
+  background: #20152673;
+  color: #f0e4f3;
+  font-size: 12px;
+}
+@keyframes map-focus-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (max-width: 800px) {
+  .map-table-focus {
+    width: calc(100vw - 24px);
+    max-height: min(420px, calc(100dvh - 145px));
+    padding: 12px;
+    border-radius: 16px;
+  }
+  .map-table-focus[data-edge-x='left'] {
+    --focus-x: -22%;
+  }
+  .map-table-focus[data-edge-x='right'] {
+    --focus-x: -78%;
+  }
+  .map-table-focus[data-edge-y='top'] {
+    --focus-y: -27%;
+  }
+  .map-table-focus[data-edge-y='bottom'] {
+    --focus-y: -80%;
+  }
+  .map-table-focus .table-focus-header {
+    padding-bottom: 9px;
+  }
+  .map-table-focus .table-focus-header h2 {
+    font-size: 19px;
+  }
+  .map-table-focus .table-focus-header p {
+    display: none;
+  }
+  .map-table-focus .focus-table-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 9px 0;
+  }
+  .map-table-focus .focus-table-core {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 76px;
+    padding: 9px;
+  }
+  .map-table-focus .focus-seat-column:first-child {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .map-table-focus .focus-seat-column:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .map-table-focus .focus-seat {
+    min-height: 43px;
+    padding: 6px;
+  }
+  .map-table-focus .focus-seat-name {
+    font-size: 13px;
+  }
+  .map-table-focus .table-focus-tip {
+    padding: 9px 11px;
+    font-size: 12px;
+  }
+}

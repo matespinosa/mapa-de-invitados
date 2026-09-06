@@ -328,7 +328,8 @@ export default function Home() {
       <div
         key={table.id}
         data-table-id={table.id}
-        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${selectedTable === table.id ? 'is-selected' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''}`}
+        aria-hidden={focusedTableId && !movingGuestId ? true : undefined}
+        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${selectedTable === table.id ? 'is-selected' : ''} ${focusedTableId === table.id ? 'is-focus-source' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''}`}
         style={{ left: table.x, top: table.y }}
         onDragOver={(e) => {
           e.preventDefault();
@@ -435,7 +436,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <a className="brand" href="./" aria-label="Recepción, inicio">
+        <a className="brand" href="/" aria-label="Recepción, inicio">
           <span className="brand-icon">
             <Armchair size={23} strokeWidth={1.8} />
           </span>
@@ -701,7 +702,7 @@ export default function Home() {
               style={{ width: 960 * fit * zoom, height: 760 * fit * zoom }}
             >
               <div
-                className="floor-map"
+                className={`floor-map ${focusedTable && !movingGuest ? 'has-table-focus' : ''}`}
                 style={{ transform: `scale(${fit * zoom})` }}
               >
                 <div className="map-compass">
@@ -749,6 +750,173 @@ export default function Home() {
                 </div>
                 <div className="open-floor-label">Un espacio para celebrar</div>
                 {tables.map(renderTable)}
+                {focusedTable && !movingGuest && (
+                  <>
+                    <button
+                      className="map-focus-dimmer"
+                      aria-label="Cerrar mesa enfocada"
+                      onClick={() => {
+                        setFocusedTableId(null);
+                        setFocusedGuestId(null);
+                      }}
+                    />
+                    <section
+                      className="map-table-focus"
+                      data-edge-x={
+                        focusedTable.x < 320
+                          ? 'left'
+                          : focusedTable.x > 680
+                            ? 'right'
+                            : 'center'
+                      }
+                      data-edge-y={
+                        focusedTable.y < 220
+                          ? 'top'
+                          : focusedTable.y > 560
+                            ? 'bottom'
+                            : 'center'
+                      }
+                      style={
+                        {
+                          left: focusedTable.x,
+                          top: focusedTable.y,
+                          '--focus-scale': 1 / Math.max(fit * zoom, 0.01),
+                        } as React.CSSProperties
+                      }
+                      aria-labelledby="focused-table-title"
+                    >
+                      <header className="table-focus-header">
+                        <div>
+                          <span className="focus-kicker">MESA EN FOCO</span>
+                          <h2 id="focused-table-title">{focusedTable.name}</h2>
+                          <p>
+                            {focusedOccupants.length} de {focusedTable.capacity}{' '}
+                            lugares ocupados
+                          </p>
+                        </div>
+                        <button
+                          className="focus-close"
+                          aria-label="Cerrar mesa enfocada"
+                          onClick={() => {
+                            setFocusedTableId(null);
+                            setFocusedGuestId(null);
+                          }}
+                        >
+                          <X size={20} />
+                        </button>
+                      </header>
+                      <div className="focus-table-layout">
+                        <div className="focus-seat-column">
+                          {Array.from(
+                            {
+                              length: Math.ceil(focusedTable.capacity / 2),
+                            },
+                            (_, seat) => {
+                              const guest = focusedOccupants.find(
+                                (g) => g.seat === seat,
+                              );
+                              return (
+                                <button
+                                  key={seat}
+                                  className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
+                                  onPointerDown={(e) => {
+                                    if (guest) startPointer(e, guest.id);
+                                  }}
+                                  onClick={() => {
+                                    if (suppressClick.current) {
+                                      suppressClick.current = false;
+                                      return;
+                                    }
+                                    if (guest) beginMove(guest.id);
+                                    else
+                                      setToast('Este lugar está disponible.');
+                                  }}
+                                >
+                                  <span className="focus-seat-number">
+                                    {String(seat + 1).padStart(2, '0')}
+                                  </span>
+                                  <span className="focus-seat-name">
+                                    {guest?.name ?? 'Disponible'}
+                                  </span>
+                                  {guest ? (
+                                    <GripVertical size={15} />
+                                  ) : (
+                                    <Plus size={15} />
+                                  )}
+                                </button>
+                              );
+                            },
+                          )}
+                        </div>
+                        <button
+                          className={`focus-table-core ${focusedTable.id === 'couple' ? 'couple' : ''}`}
+                          onClick={() => setTableDetailsOpen(true)}
+                          aria-label={`Editar lugares de ${focusedTable.name}`}
+                        >
+                          {focusedTable.id === 'couple' ? (
+                            <Heart size={28} />
+                          ) : (
+                            <span>
+                              {focusedTable.name.replace('Mesa ', '')}
+                            </span>
+                          )}
+                          <strong>{focusedTable.name}</strong>
+                          <small>Toca para editar sus lugares</small>
+                        </button>
+                        <div className="focus-seat-column">
+                          {Array.from(
+                            {
+                              length: Math.floor(focusedTable.capacity / 2),
+                            },
+                            (_, index) => {
+                              const seat =
+                                index + Math.ceil(focusedTable.capacity / 2);
+                              const guest = focusedOccupants.find(
+                                (g) => g.seat === seat,
+                              );
+                              return (
+                                <button
+                                  key={seat}
+                                  className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
+                                  onPointerDown={(e) => {
+                                    if (guest) startPointer(e, guest.id);
+                                  }}
+                                  onClick={() => {
+                                    if (suppressClick.current) {
+                                      suppressClick.current = false;
+                                      return;
+                                    }
+                                    if (guest) beginMove(guest.id);
+                                    else
+                                      setToast('Este lugar está disponible.');
+                                  }}
+                                >
+                                  <span className="focus-seat-number">
+                                    {String(seat + 1).padStart(2, '0')}
+                                  </span>
+                                  <span className="focus-seat-name">
+                                    {guest?.name ?? 'Disponible'}
+                                  </span>
+                                  {guest ? (
+                                    <GripVertical size={15} />
+                                  ) : (
+                                    <Plus size={15} />
+                                  )}
+                                </button>
+                              );
+                            },
+                          )}
+                        </div>
+                      </div>
+                      <div className="table-focus-tip">
+                        <ArrowLeftRight size={17} />
+                        <span>
+                          Toca un nombre para moverlo o arrástralo a otro lugar.
+                        </span>
+                      </div>
+                    </section>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -804,142 +972,6 @@ export default function Home() {
           Hecho para reunir
         </span>
       </footer>
-      {focusedTable && !movingGuest && (
-        <div className="table-focus-layer">
-          <button
-            className="table-focus-backdrop"
-            aria-label="Cerrar vista de la mesa"
-            onClick={() => {
-              setFocusedTableId(null);
-              setFocusedGuestId(null);
-            }}
-          />
-          <dialog
-            open
-            className="table-focus-card"
-            aria-modal="true"
-            aria-labelledby="focused-table-title"
-          >
-            <header className="table-focus-header">
-              <div>
-                <span className="focus-kicker">MESA EN FOCO</span>
-                <h2 id="focused-table-title">{focusedTable.name}</h2>
-                <p>
-                  {focusedOccupants.length} de {focusedTable.capacity} lugares
-                  ocupados
-                </p>
-              </div>
-              <button
-                className="focus-close"
-                aria-label="Cerrar mesa enfocada"
-                onClick={() => {
-                  setFocusedTableId(null);
-                  setFocusedGuestId(null);
-                }}
-              >
-                <X size={20} />
-              </button>
-            </header>
-            <div className="focus-table-layout">
-              <div className="focus-seat-column">
-                {Array.from(
-                  { length: Math.ceil(focusedTable.capacity / 2) },
-                  (_, seat) => {
-                    const guest = focusedOccupants.find((g) => g.seat === seat);
-                    return (
-                      <button
-                        key={seat}
-                        className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
-                        onPointerDown={(e) => {
-                          if (guest) startPointer(e, guest.id);
-                        }}
-                        onClick={() => {
-                          if (suppressClick.current) {
-                            suppressClick.current = false;
-                            return;
-                          }
-                          if (guest) beginMove(guest.id);
-                          else setToast('Este lugar está disponible.');
-                        }}
-                      >
-                        <span className="focus-seat-number">
-                          {String(seat + 1).padStart(2, '0')}
-                        </span>
-                        <span className="focus-seat-name">
-                          {guest?.name ?? 'Disponible'}
-                        </span>
-                        {guest ? (
-                          <GripVertical size={15} />
-                        ) : (
-                          <Plus size={15} />
-                        )}
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-              <button
-                className={`focus-table-core ${focusedTable.id === 'couple' ? 'couple' : ''}`}
-                onClick={() => setTableDetailsOpen(true)}
-                aria-label={`Abrir detalle de ${focusedTable.name}`}
-              >
-                {focusedTable.id === 'couple' ? (
-                  <Heart size={28} />
-                ) : (
-                  <span>{focusedTable.name.replace('Mesa ', '')}</span>
-                )}
-                <strong>{focusedTable.name}</strong>
-                <small>Toca otra vez para ver el detalle</small>
-              </button>
-              <div className="focus-seat-column">
-                {Array.from(
-                  { length: Math.floor(focusedTable.capacity / 2) },
-                  (_, index) => {
-                    const seat = index + Math.ceil(focusedTable.capacity / 2);
-                    const guest = focusedOccupants.find((g) => g.seat === seat);
-                    return (
-                      <button
-                        key={seat}
-                        className={`focus-seat ${guest ? 'occupied' : 'vacant'} ${guest?.id === focusedGuestId ? 'is-current' : ''}`}
-                        onPointerDown={(e) => {
-                          if (guest) startPointer(e, guest.id);
-                        }}
-                        onClick={() => {
-                          if (suppressClick.current) {
-                            suppressClick.current = false;
-                            return;
-                          }
-                          if (guest) beginMove(guest.id);
-                          else setToast('Este lugar está disponible.');
-                        }}
-                      >
-                        <span className="focus-seat-number">
-                          {String(seat + 1).padStart(2, '0')}
-                        </span>
-                        <span className="focus-seat-name">
-                          {guest?.name ?? 'Disponible'}
-                        </span>
-                        {guest ? (
-                          <GripVertical size={15} />
-                        ) : (
-                          <Plus size={15} />
-                        )}
-                      </button>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-            <div className="table-focus-tip">
-              <ArrowLeftRight size={17} />
-              <span>
-                Toca un nombre para moverlo, o arrástralo directamente a otro
-                lugar.
-              </span>
-            </div>
-          </dialog>
-        </div>
-      )}
       {dragging && (
         <div
           className="drag-preview"
@@ -966,9 +998,9 @@ export default function Home() {
           <DialogClose className="dialog-close-button" aria-label="Cerrar">
             <X size={18} />
           </DialogClose>
-          <DialogTitle>{focusedTable?.name}</DialogTitle>
+          <DialogTitle>Editar {focusedTable?.name}</DialogTitle>
           <DialogDescription>
-            Revisa cada lugar. Puedes mover o editar a cualquier integrante.
+            Cambia nombres o lugares cuando necesites hacer un ajuste puntual.
           </DialogDescription>
           <div className="table-detail-list">
             {focusedTable &&
