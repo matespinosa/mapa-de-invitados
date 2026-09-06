@@ -435,7 +435,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Recepción, inicio">
+        <a className="brand" href="./" aria-label="Recepción, inicio">
           <span className="brand-icon">
             <Armchair size={23} strokeWidth={1.8} />
           </span>

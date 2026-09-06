@@ -26,3 +26,7 @@ npm run build
 El servidor de esta sesión se ejecuta desde `/private/tmp/recepcion-en-su-lugar`, debido a un problema de acceso del sistema a Documentos. El código se copia también al directorio del proyecto original. La foto se conserva en `public/plano-original.jpg`.
 
 La revisión visual e interactiva se documenta en `design-qa.md`.
+
+## Publicación en GitHub Pages
+
+El repositorio incluye un workflow que genera la versión estática y la publica automáticamente en GitHub Pages cada vez que se actualiza `main`. El organizador mantiene los cambios en el navegador mediante `localStorage`; no sincroniza nombres ni movimientos entre dispositivos.
