@@ -2231,7 +2231,32 @@ h1 > span {
   color: #807487;
 }
 
-/* Keep table context inside the plan while revealing every full name. */
+/* Keep the focused table inside the visible plan at every screen size. */
+.canvas-viewport {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+}
+.canvas-scroller {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 12px 16px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #d5c2e0 transparent;
+  touch-action: pan-x pan-y;
+}
+.map-focus-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  pointer-events: none;
+}
 .map-focus-dimmer {
   position: absolute;
   inset: 0;
@@ -2242,41 +2267,49 @@ h1 > span {
   background: #211a2670;
   backdrop-filter: blur(2px) saturate(0.72);
   cursor: default;
+  pointer-events: auto;
   animation: map-focus-fade 0.18s ease-out;
 }
 .map-table-focus {
   --focus-x: -50%;
   --focus-y: -50%;
-  --focus-scale: 1;
   position: absolute;
+  left: 50%;
+  top: 50%;
   z-index: 40;
-  width: min(560px, calc(100vw - 40px));
-  max-height: min(590px, calc(100dvh - 150px));
+  width: min(560px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
   overflow: auto;
   padding: 15px;
   border: 1px solid #ffffff42;
   border-radius: 20px;
-  background: #3a2b406b;
+  background: #3a2b40cc;
   color: #fff;
   box-shadow:
     0 24px 75px #160d1d52,
     inset 0 0 0 1px #ffffff17;
-  backdrop-filter: blur(8px);
-  transform: scale(var(--focus-scale)) translate(var(--focus-x), var(--focus-y));
-  transform-origin: top left;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  transform: translate(var(--focus-x), var(--focus-y));
   animation: map-focus-fade 0.2s ease-out;
 }
 .map-table-focus[data-edge-x='left'] {
-  --focus-x: -44%;
+  left: 12px;
+  --focus-x: 0;
 }
 .map-table-focus[data-edge-x='right'] {
-  --focus-x: -56%;
+  right: 12px;
+  left: auto;
+  --focus-x: 0;
 }
 .map-table-focus[data-edge-y='top'] {
-  --focus-y: -18%;
+  top: 12px;
+  --focus-y: 0;
 }
 .map-table-focus[data-edge-y='bottom'] {
-  --focus-y: -82%;
+  top: auto;
+  bottom: 12px;
+  --focus-y: 0;
 }
 .map-table-focus .table-focus-header {
   padding: 2px 2px 13px;
@@ -2315,6 +2348,7 @@ h1 > span {
   border-color: #e7dce9;
   background: #fffdfdfa;
   box-shadow: 0 5px 16px #21142921;
+  touch-action: manipulation;
 }
 .map-table-focus .focus-seat:hover,
 .map-table-focus .focus-seat.is-current {
@@ -2357,44 +2391,161 @@ h1 > span {
     opacity: 0;
   }
 }
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.table-touch-target {
+  display: none;
+}
+.map-only-toggle {
+  height: 36px;
+  border-color: #ddcfe4;
+  background: #f5eff8;
+  color: #744982;
+  font-size: 12px;
+}
+.map-only-toggle:hover,
+.map-only-toggle[aria-pressed='true'] {
+  border-color: #c3a6d0;
+  background: #eadcf1;
+}
+.map-only-label-short {
+  display: none;
+}
+.app-shell.map-only {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  background: #f7f7f9;
+}
+.map-only .app-header,
+.map-only .guest-panel,
+.map-only .workspace-footer,
+.map-only .plan-stats,
+.map-only .mobile-guests {
+  display: none;
+}
+.map-only .workspace {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+}
+.map-only .plan-panel {
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+.map-only .plan-toolbar {
+  height: 56px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+}
+.map-only .canvas-viewport {
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  flex: 1;
+}
+.map-only .canvas-bottom {
+  height: 52px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+.map-only .legend {
+  display: none;
+}
+
 @media (max-width: 800px) {
-  .map-table-focus {
-    width: calc(100vw - 24px);
-    max-height: min(420px, calc(100dvh - 145px));
-    padding: 12px;
-    border-radius: 16px;
+  .canvas-scroller {
+    align-items: center;
+    padding: 10px 12px;
   }
-  .map-table-focus[data-edge-x='left'] {
-    --focus-x: -22%;
+  .table-touch-target {
+    display: block;
+    position: absolute;
+    inset: -24px -32px;
+    z-index: 0;
+    border: 0;
+    background: transparent;
   }
+  .table-group .table-surface {
+    z-index: 1;
+  }
+  .seat.occupied,
+  .focus-seat {
+    touch-action: manipulation;
+  }
+  .map-table-focus,
+  .map-table-focus[data-edge-x='left'],
   .map-table-focus[data-edge-x='right'] {
-    --focus-x: -78%;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: calc(100% - 16px);
+    padding: 10px;
+    border-radius: 16px;
+    --focus-x: 0;
   }
   .map-table-focus[data-edge-y='top'] {
-    --focus-y: -27%;
+    top: 8px;
+    bottom: auto;
+    --focus-y: 0;
   }
   .map-table-focus[data-edge-y='bottom'] {
-    --focus-y: -80%;
+    top: auto;
+    bottom: 8px;
+    --focus-y: 0;
+  }
+  .map-table-focus[data-edge-y='center'] {
+    top: 50%;
+    bottom: auto;
+    --focus-y: -50%;
   }
   .map-table-focus .table-focus-header {
-    padding-bottom: 9px;
+    padding: 0 1px 7px;
+  }
+  .map-table-focus .focus-kicker {
+    font-size: 9px;
   }
   .map-table-focus .table-focus-header h2 {
-    font-size: 19px;
+    margin-top: 1px;
+    font-size: 18px;
   }
   .map-table-focus .table-focus-header p {
     display: none;
   }
+  .map-table-focus .focus-close {
+    width: 34px;
+    height: 34px;
+  }
   .map-table-focus .focus-table-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
-    padding: 9px 0;
+    gap: 5px;
+    padding: 7px 0;
   }
   .map-table-focus .focus-table-core {
     grid-column: 1 / -1;
     grid-row: 1;
-    min-height: 76px;
-    padding: 9px;
+    min-height: 52px;
+    padding: 6px 9px;
+    border-radius: 12px;
+    flex-direction: row;
+  }
+  .map-table-focus .focus-table-core > span {
+    font-size: 22px;
+  }
+  .map-table-focus .focus-table-core > small {
+    display: none;
+  }
+  .map-table-focus .focus-seat-column {
+    gap: 4px;
   }
   .map-table-focus .focus-seat-column:first-child {
     grid-column: 1;
@@ -2405,14 +2556,62 @@ h1 > span {
     grid-row: 2;
   }
   .map-table-focus .focus-seat {
-    min-height: 43px;
-    padding: 6px;
+    grid-template-columns: 22px minmax(0, 1fr);
+    min-height: 36px;
+    gap: 5px;
+    padding: 4px 6px;
+    border-radius: 8px;
+    box-shadow: 0 3px 10px #2114291c;
+  }
+  .map-table-focus .focus-seat > svg {
+    display: none;
+  }
+  .map-table-focus .focus-seat-number {
+    width: 22px;
+    height: 22px;
+    font-size: 9px;
   }
   .map-table-focus .focus-seat-name {
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.1;
   }
   .map-table-focus .table-focus-tip {
-    padding: 9px 11px;
-    font-size: 12px;
+    gap: 6px;
+    padding: 7px 9px;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+  .plan-toolbar {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .plan-title {
+    gap: 7px;
+  }
+  .plan-title h2 {
+    font-size: 14px;
+  }
+  .plan-actions {
+    gap: 3px;
+  }
+  .undo-button {
+    width: 34px;
+    padding: 0;
+  }
+  .undo-button span,
+  .map-only-label-full {
+    display: none;
+  }
+  .map-only-label-short {
+    display: inline;
+  }
+  .map-only-toggle {
+    padding: 0 10px;
+  }
+  .map-only .plan-toolbar {
+    height: 54px;
+  }
+  .map-only .canvas-bottom {
+    height: 50px;
   }
 }
