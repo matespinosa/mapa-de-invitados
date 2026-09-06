@@ -350,3 +350,31 @@ test('disposing a view releases touch capture and stops pending drag work', () =
   assert.equal(env.calls.drops.length, 0);
   assert.deepEqual(env.guests, initialGuests);
 });
+
+test('the roster accepts a new guest, assigns an exact seat, and preserves unassigned guests', () => {
+  const added = {
+    id: 'guest-test-1',
+    name: 'Laura Martínez',
+    tableId: null,
+    seat: null,
+  };
+  const extended = [...initialGuests, added];
+  assert.ok(validateGuests(extended));
+
+  const placed = moveGuest(extended, added.id, 't4', 3);
+  assert.equal(placed.error, undefined);
+  assert.equal(placed.guests.at(-1).tableId, 't4');
+  assert.equal(placed.guests.at(-1).seat, 3);
+  assert.ok(validateGuests(placed.guests));
+
+  const removedFromTable = moveGuest(placed.guests, added.id, null);
+  assert.equal(removedFromTable.guests.at(-1).tableId, null);
+  assert.equal(removedFromTable.guests.at(-1).seat, null);
+  assert.ok(validateGuests(removedFromTable.guests));
+});
+
+test('deleting a guest is represented by a valid shorter roster', () => {
+  const remaining = initialGuests.filter((guest) => guest.id !== 'g1');
+  assert.equal(remaining.length, initialGuests.length - 1);
+  assert.ok(validateGuests(remaining));
+});

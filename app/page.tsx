@@ -33,6 +33,8 @@ import {
   UserRound,
   MapPin,
   ArrowLeftRight,
+  Trash2,
+  UserRoundMinus,
 } from 'lucide-react';
 import {
   Dialog,
@@ -42,6 +44,17 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -49,6 +62,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import Link from 'next/link';
 import {
   initialGuests,
   tables,
@@ -78,6 +92,25 @@ const normalize = (s: string) =>
     .toLowerCase();
 const tableName = (id: string | null) =>
   tables.find((t) => t.id === id)?.name ?? 'Sin mesa';
+const totalSeats = tables.reduce((sum, table) => sum + table.capacity, 0);
+const toneIndex = (id: string) => {
+  const digits = id.match(/\d+/)?.[0];
+  if (digits) return Number(digits) % 4;
+  return (
+    Array.from(id).reduce(
+      (sum, character) => sum + character.charCodeAt(0),
+      0,
+    ) % 4
+  );
+};
+const createGuestId = (guests: readonly Guest[]) => {
+  const used = new Set(guests.map((guest) => guest.id));
+  const prefix = `guest-${Date.now().toString(36)}`;
+  let candidate = prefix;
+  let suffix = 2;
+  while (used.has(candidate)) candidate = `${prefix}-${suffix++}`;
+  return candidate;
+};
 export default function Home() {
   const [guests, setGuests] = useState<Guest[]>(initialGuests),
     [history, setHistory] = useState<Guest[][]>([]);
@@ -96,6 +129,12 @@ export default function Home() {
     [focusedGuestId, setFocusedGuestId] = useState<string | null>(null),
     [movingGuestId, setMovingGuestId] = useState<string | null>(null),
     [tableDetailsOpen, setTableDetailsOpen] = useState(false);
+  const [addPersonOpen, setAddPersonOpen] = useState(false),
+    [addPersonName, setAddPersonName] = useState(''),
+    [addPersonTable, setAddPersonTable] = useState('none'),
+    [addPersonSeat, setAddPersonSeat] = useState<number | null>(null),
+    [addFromTableId, setAddFromTableId] = useState<string | null>(null),
+    [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [toast, setToast] = useState(''),
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState(true);
@@ -123,12 +162,15 @@ export default function Home() {
   }
   const active = guests.find((g) => g.id === selectedGuest),
     seated = guests.filter((g) => g.tableId).length,
+    guestCount = guests.length,
+    unassigned = guestCount - seated,
     selected = tables.find((t) => t.id === selectedTable),
     focusedTable = tables.find((t) => t.id === focusedTableId),
     movingGuest = guests.find((g) => g.id === movingGuestId),
     focusedOccupants = focusedTable
       ? guests.filter((g) => g.tableId === focusedTable.id)
-      : [];
+      : [],
+    pendingDelete = guests.find((g) => g.id === pendingDeleteId);
   const expandedTable = dragging ? undefined : focusedTable;
   const expandedLayout = expandedTable
     ? expandTable(expandedTable, guests, viewport)
@@ -325,6 +367,8 @@ export default function Home() {
         e.key === 'Escape' &&
         !e.defaultPrevented &&
         !tableDetailsOpen &&
+        !addPersonOpen &&
+        !pendingDeleteId &&
         !selectedGuest &&
         !helpOpen &&
         !referenceOpen
@@ -335,7 +379,15 @@ export default function Home() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cancelMove, tableDetailsOpen, selectedGuest, helpOpen, referenceOpen]);
+  }, [
+    addPersonOpen,
+    cancelMove,
+    helpOpen,
+    pendingDeleteId,
+    referenceOpen,
+    selectedGuest,
+    tableDetailsOpen,
+  ]);
   function undo() {
     if (!history.length) return;
     releaseGuestPointer(pointer);
@@ -384,6 +436,95 @@ export default function Home() {
       assign(movingGuestId, g.tableId, g.seat ?? undefined);
     } else if (g.tableId) focusTable(g.tableId, g.id);
     else openGuest(g);
+  }
+  function openAddPerson(
+    tableId: string | null = null,
+    seat: number | null = null,
+  ) {
+    const table = tableId
+      ? tables.find((candidate) => candidate.id === tableId)
+      : undefined;
+    const occupied = table
+      ? guests.filter((guest) => guest.tableId === table.id).length
+      : 0;
+    const seatIsFree =
+      table && seat !== null
+        ? !guests.some(
+            (guest) => guest.tableId === table.id && guest.seat === seat,
+          )
+        : true;
+    const canAssignToTable = Boolean(
+      table && occupied < table.capacity && seatIsFree,
+    );
+    setAddPersonName('');
+    setAddPersonTable(canAssignToTable && table ? table.id : 'none');
+    setAddPersonSeat(canAssignToTable ? seat : null);
+    setAddFromTableId(tableId);
+    setTableDetailsOpen(false);
+    setAddPersonOpen(true);
+  }
+  function addPerson() {
+    const name = addPersonName.trim();
+    if (!name) return;
+    const id = createGuestId(guests);
+    const draft: Guest[] = [...guests, { id, name, tableId: null, seat: null }];
+    let next = draft;
+    if (addPersonTable !== 'none') {
+      const result = moveGuest(
+        draft,
+        id,
+        addPersonTable,
+        addPersonSeat ?? undefined,
+      );
+      if (result.error) {
+        setToast(result.error);
+        return;
+      }
+      next = result.guests;
+    }
+    commit(next);
+    const placedAt = next.find((guest) => guest.id === id)?.tableId;
+    const returnToTable = addFromTableId;
+    setAddPersonOpen(false);
+    setAddPersonName('');
+    setAddPersonTable('none');
+    setAddPersonSeat(null);
+    setAddFromTableId(null);
+    if (returnToTable) setTableDetailsOpen(true);
+    setToast(
+      placedAt
+        ? `${name} agregado · ${tableName(placedAt)}`
+        : `${name} agregado a la lista sin mesa`,
+    );
+  }
+  function removeFromTable(id: string) {
+    const guest = guests.find((candidate) => candidate.id === id);
+    if (!guest?.tableId) return;
+    commit(
+      guests.map((candidate) =>
+        candidate.id === id
+          ? { ...candidate, tableId: null, seat: null }
+          : candidate,
+      ),
+    );
+    setFocusedGuestId(null);
+    setToast(`${guest.name} quedó sin mesa`);
+  }
+  function requestDelete(id: string) {
+    setTableDetailsOpen(false);
+    setSelectedGuest(null);
+    setPendingDeleteId(id);
+  }
+  function deletePerson() {
+    const guest = guests.find((candidate) => candidate.id === pendingDeleteId);
+    if (!guest) {
+      setPendingDeleteId(null);
+      return;
+    }
+    commit(guests.filter((candidate) => candidate.id !== guest.id));
+    setPendingDeleteId(null);
+    setFocusedGuestId(null);
+    setToast(`${guest.name} eliminado del evento`);
   }
   function saveGuest() {
     if (!active || !editName.trim()) return;
@@ -584,7 +725,7 @@ export default function Home() {
               onClick={() => {
                 if (movingGuestId) assign(movingGuestId, table.id, seat);
                 else if (expanded && guest) beginMove(guest.id);
-                else if (expanded) setToast('Este lugar está disponible.');
+                else if (expanded) openAddPerson(table.id, seat);
                 else focusTable(table.id, guest?.id ?? null);
               }}
             >
@@ -607,12 +748,12 @@ export default function Home() {
   return (
     <main className={`app-shell ${mapOnly ? 'map-only' : ''}`}>
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Recepción, inicio">
+        <Link className="brand" href="/" aria-label="Recepción, inicio">
           <span className="brand-icon">
             <Armchair size={23} strokeWidth={1.8} />
           </span>
           Recepción<span className="brand-dot">.</span>
-        </a>
+        </Link>
         <div className="event-title">
           <span className="header-divider" />
           <span>Acomodación de invitados</span>
@@ -645,19 +786,26 @@ export default function Home() {
           <div className="panel-heading">
             <h2>
               {selected ? selected.name : 'Tus invitados'}
-              <span>{selected ? visibleGuests.length : 90}</span>
+              <span>{selected ? visibleGuests.length : guestCount}</span>
             </h2>
-            {selected ? (
+            <div className="panel-heading-actions">
               <button
-                className="icon-button"
-                aria-label="Ver todos los invitados"
-                onClick={() => setSelectedTable(null)}
+                className="button add-person-trigger"
+                onClick={() => openAddPerson(selected?.id ?? null)}
               >
-                <X size={17} />
+                <Plus size={15} />
+                <span>Agregar</span>
               </button>
-            ) : (
-              <Users size={19} className="muted" />
-            )}
+              {selected ? (
+                <button
+                  className="icon-button"
+                  aria-label="Ver todos los invitados"
+                  onClick={() => setSelectedTable(null)}
+                >
+                  <X size={17} />
+                </button>
+              ) : null}
+            </div>
             <button
               className="icon-button mobile-close"
               aria-label="Cerrar invitados"
@@ -697,10 +845,10 @@ export default function Home() {
           >
             <TabsList className="guest-tabs">
               <TabsTrigger value="all">
-                Todos <span>90</span>
+                Todos <span>{guestCount}</span>
               </TabsTrigger>
               <TabsTrigger value="unassigned">
-                Sin mesa <span>{90 - seated}</span>
+                Sin mesa <span>{unassigned}</span>
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -744,7 +892,7 @@ export default function Home() {
                 onClick={() => handleGuestClick(g)}
               >
                 <GripVertical size={14} className="drag-handle" />
-                <span className={`avatar tone-${Number(g.id.slice(1)) % 4}`}>
+                <span className={`avatar tone-${toneIndex(g.id)}`}>
                   {initials(g.name)}
                 </span>
                 <span className="guest-info">
@@ -860,19 +1008,17 @@ export default function Home() {
             </span>
             <span>
               <i className="status-dot amber" />
-              <strong>{90 - seated}</strong> sin mesa
+              <strong>{unassigned}</strong> sin mesa
             </span>
             <span>
               <Armchair size={15} />
-              <strong>{102 - seated}</strong> lugares libres
+              <strong>{totalSeats - seated}</strong> lugares libres
             </span>
             <span className="table-count">10 mesas + pareja</span>
           </div>
           {movingGuest && !dragging && (
             <output className="move-banner">
-              <span
-                className={`avatar tone-${Number(movingGuest.id.slice(1)) % 4}`}
-              >
+              <span className={`avatar tone-${toneIndex(movingGuest.id)}`}>
                 {initials(movingGuest.name)}
               </span>
               <span className="move-banner-copy">
@@ -1086,10 +1232,21 @@ export default function Home() {
           <DialogClose className="dialog-close-button" aria-label="Cerrar">
             <X size={18} />
           </DialogClose>
-          <DialogTitle>Editar {focusedTable?.name}</DialogTitle>
-          <DialogDescription>
-            Cambia nombres o lugares cuando necesites hacer un ajuste puntual.
-          </DialogDescription>
+          <div className="table-detail-heading">
+            <div>
+              <DialogTitle>Información de {focusedTable?.name}</DialogTitle>
+              <DialogDescription>
+                Administra quién ocupa cada lugar de esta mesa.
+              </DialogDescription>
+            </div>
+            <button
+              className="button table-add-button"
+              onClick={() => openAddPerson(focusedTable?.id ?? null)}
+            >
+              <Plus size={15} />
+              <span>Agregar persona</span>
+            </button>
+          </div>
           <div className="table-detail-list">
             {focusedTable &&
               Array.from({ length: focusedTable.capacity }, (_, seat) => {
@@ -1103,7 +1260,7 @@ export default function Home() {
                       {String(seat + 1).padStart(2, '0')}
                     </span>
                     <span
-                      className={`avatar ${guest ? `tone-${Number(guest.id.slice(1)) % 4}` : ''}`}
+                      className={`avatar ${guest ? `tone-${toneIndex(guest.id)}` : ''}`}
                     >
                       {guest ? initials(guest.name) : <Plus size={14} />}
                     </span>
@@ -1111,14 +1268,24 @@ export default function Home() {
                       <strong>{guest?.name ?? 'Lugar disponible'}</strong>
                       <small>Lugar {seat + 1}</small>
                     </span>
-                    {guest && (
+                    {guest ? (
                       <span className="detail-actions">
                         <button
                           onClick={() => beginMove(guest.id)}
                           aria-label={`Mover a ${guest.name}`}
+                          title="Mover a otra mesa"
                         >
                           <ArrowLeftRight size={15} />
-                          Mover
+                          <span className="detail-action-label">Mover</span>
+                        </button>
+                        <button
+                          className="detail-remove"
+                          onClick={() => removeFromTable(guest.id)}
+                          aria-label={`Quitar a ${guest.name} de la mesa`}
+                          title="Quitar de la mesa"
+                        >
+                          <UserRoundMinus size={15} />
+                          <span className="detail-action-label">Quitar</span>
                         </button>
                         <button
                           className="detail-edit"
@@ -1127,15 +1294,141 @@ export default function Home() {
                             openGuest(guest);
                           }}
                           aria-label={`Editar a ${guest.name}`}
+                          title="Editar persona"
                         >
                           <Pencil size={15} />
                         </button>
+                        <button
+                          className="detail-delete"
+                          onClick={() => requestDelete(guest.id)}
+                          aria-label={`Eliminar a ${guest.name} del evento`}
+                          title="Eliminar del evento"
+                        >
+                          <Trash2 size={15} />
+                        </button>
                       </span>
+                    ) : (
+                      <button
+                        className="detail-add-slot"
+                        onClick={() =>
+                          openAddPerson(focusedTable?.id ?? null, seat)
+                        }
+                        aria-label={`Agregar una persona al lugar ${seat + 1}`}
+                      >
+                        <Plus size={15} />
+                        <span>Agregar aquí</span>
+                      </button>
                     )}
                   </div>
                 );
               })}
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={addPersonOpen}
+        onOpenChange={(open) => {
+          setAddPersonOpen(open);
+          if (!open) {
+            setAddPersonName('');
+            setAddPersonTable('none');
+            setAddPersonSeat(null);
+            setAddFromTableId(null);
+          }
+        }}
+      >
+        <DialogContent
+          className="guest-dialog add-person-dialog"
+          showCloseButton={false}
+        >
+          <DialogClose className="dialog-close-button" aria-label="Cerrar">
+            <X size={18} />
+          </DialogClose>
+          <DialogTitle>Agregar persona</DialogTitle>
+          <DialogDescription>
+            {addFromTableId
+              ? `Añade un nombre a ${tableName(addFromTableId)} o déjalo sin mesa por ahora.`
+              : 'Añade un nombre a la lista y decide dónde ubicarlo.'}
+          </DialogDescription>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              addPerson();
+            }}
+          >
+            <label className="field-label" htmlFor="new-person-name">
+              Nombre de la persona
+            </label>
+            <div className="dialog-input">
+              <UserRound size={16} />
+              <input
+                id="new-person-name"
+                value={addPersonName}
+                maxLength={70}
+                required
+                placeholder="Ej. Laura Martínez"
+                onChange={(e) => setAddPersonName(e.target.value)}
+              />
+            </div>
+            <span className="field-label" id="new-person-table-label">
+              Mesa
+            </span>
+            <Select
+              value={addPersonTable}
+              onValueChange={(value) => {
+                setAddPersonTable(String(value));
+                setAddPersonSeat(null);
+              }}
+            >
+              <SelectTrigger
+                aria-labelledby="new-person-table-label"
+                className="table-select"
+              >
+                <SelectValue>
+                  {tableName(addPersonTable === 'none' ? null : addPersonTable)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Sin mesa</SelectItem>
+                {tables.map((table) => {
+                  const occupied = guests.filter(
+                    (guest) => guest.tableId === table.id,
+                  ).length;
+                  const free = table.capacity - occupied;
+                  return (
+                    <SelectItem
+                      key={table.id}
+                      value={table.id}
+                      disabled={free === 0}
+                    >
+                      {table.name} · {free} {free === 1 ? 'libre' : 'libres'}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {addPersonTable !== 'none' && addPersonSeat !== null ? (
+              <p className="seat-assignment-note">
+                Se asignará al lugar {addPersonSeat + 1} de{' '}
+                {tableName(addPersonTable)}.
+              </p>
+            ) : null}
+            <div className="dialog-tip">
+              <LayoutGrid size={17} />
+              <span>
+                Puedes moverla después desde el plano o desde la información de
+                la mesa.
+              </span>
+            </div>
+            <button
+              className="button primary"
+              type="submit"
+              disabled={!addPersonName.trim()}
+            >
+              <Plus size={17} />
+              Agregar persona
+            </button>
+          </form>
         </DialogContent>
       </Dialog>
       <Dialog
@@ -1171,9 +1464,9 @@ export default function Home() {
                 onChange={(e) => setEditName(e.target.value)}
               />
             </div>
-            <label className="field-label" id="table-label">
+            <span className="field-label" id="table-label">
               Mesa
-            </label>
+            </span>
             <Select
               value={editTable}
               onValueChange={(v) => setEditTable(String(v))}
@@ -1219,9 +1512,49 @@ export default function Home() {
               <Check size={17} />
               Guardar cambios
             </button>
+            <button
+              className="delete-person-button"
+              type="button"
+              onClick={() => {
+                if (active) requestDelete(active.id);
+              }}
+            >
+              <Trash2 size={15} />
+              Eliminar persona del evento
+            </button>
           </form>
         </DialogContent>
       </Dialog>
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <AlertDialogContent className="delete-dialog" size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="delete-dialog-media">
+              <Trash2 size={20} />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              ¿Eliminar a {pendingDelete?.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta persona se quitará del evento y de su mesa. Si solo quieres
+              liberar el lugar, usa «Quitar de la mesa».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="delete-confirm-action"
+              onClick={deletePerson}
+            >
+              Eliminar persona
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={referenceOpen} onOpenChange={setReferenceOpen}>
         <DialogContent className="reference-dialog" showCloseButton={false}>
           <DialogClose className="dialog-close-button" aria-label="Cerrar">

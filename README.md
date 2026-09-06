@@ -8,6 +8,8 @@ Organizador de recepción en React y TypeScript, basado en el diagrama proporcio
 - 10 mesas de 10 lugares, más la mesa de la pareja de 2. Es una interpretación del plano, no un plano a escala.
 - Arrastra con el ratón desde la lista o un asiento para mover; suelta sobre una persona para intercambiar.
 - Toca un nombre para editarlo y elegir una mesa. En móvil, usa «Ver invitados».
+- Abre una mesa para ver sus lugares: agrega personas nuevas en puestos libres,
+  quítalas de la mesa sin borrarlas del evento o elimínalas con confirmación.
 - Búsqueda, filtro de personas sin mesa, vista por mesa, zoom y deshacer (40 cambios por sesión).
 - El borrador se guarda en localStorage únicamente en ese navegador. No hay sincronización entre dispositivos.
 

@@ -5,7 +5,9 @@ const repository = process.env.GITHUB_REPOSITORY;
 const repositoryName = repository?.split('/')[1];
 
 if (!repositoryName) {
-  throw new Error('GITHUB_REPOSITORY is required to prepare the Pages artifact.');
+  throw new Error(
+    'GITHUB_REPOSITORY is required to prepare the Pages artifact.',
+  );
 }
 
 const basePath = `/${repositoryName}`;
