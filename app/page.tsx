@@ -655,7 +655,7 @@ export default function Home() {
             {occupants.length}
             <span> / {table.capacity}</span>
           </span>
-          {table.id !== 'couple' && occupants.length === 0 && (
+          {!expanded && table.id !== 'couple' && occupants.length === 0 && (
             <Plus size={14} />
           )}
           {expanded && <Pencil size={14} className="table-edit-hint" />}
@@ -740,7 +740,7 @@ export default function Home() {
           );
         })}
         {table.id === 'couple' && !expanded && (
-          <span className="couple-label">Mesa de la pareja</span>
+          <span className="couple-label">Pareja</span>
         )}
       </div>
     );
@@ -791,6 +791,7 @@ export default function Home() {
             <div className="panel-heading-actions">
               <button
                 className="button add-person-trigger"
+                aria-label="Agregar persona"
                 onClick={() => openAddPerson(selected?.id ?? null)}
               >
                 <Plus size={15} />
@@ -950,7 +951,7 @@ export default function Home() {
           </div>
           <div className="panel-foot">
             <CircleHelp size={14} />
-            <span>Toca un nombre para ver su mesa y moverlo.</span>
+            <span>Abre una mesa para mover o editar personas.</span>
           </div>
         </aside>
         <section
@@ -961,9 +962,6 @@ export default function Home() {
             <div className="plan-title">
               <LayoutGrid size={18} />
               <h2>{expandedTable?.name ?? 'Plano del salón'}</h2>
-              {!expandedTable && (
-                <span className="subtle-badge">Según tu foto</span>
-              )}
             </div>
             <div className="plan-actions">
               {expandedTable && (
@@ -1014,7 +1012,6 @@ export default function Home() {
               <Armchair size={15} />
               <strong>{totalSeats - seated}</strong> lugares libres
             </span>
-            <span className="table-count">10 mesas + pareja</span>
           </div>
           {movingGuest && !dragging && (
             <output className="move-banner">
@@ -1112,9 +1109,6 @@ export default function Home() {
                     <CakeSlice size={21} />
                     <span>PONQUÉ</span>
                   </div>
-                  <div className="open-floor-label">
-                    Un espacio para celebrar
-                  </div>
                   {expandedTable && (
                     <button
                       className="map-focus-dimmer"
@@ -1138,11 +1132,13 @@ export default function Home() {
           </div>
           <div className="canvas-bottom">
             {expandedTable ? (
-              <span className="map-instruction">
-                {movingGuest
-                  ? 'Toca un asiento para ubicarlo.'
-                  : 'Arrastra un nombre hacia otra mesa.'}
-              </span>
+              <button
+                className="button edit-people-button"
+                onClick={() => setTableDetailsOpen(true)}
+              >
+                <Pencil size={15} />
+                Editar personas
+              </button>
             ) : (
               <div className="legend">
                 <span>

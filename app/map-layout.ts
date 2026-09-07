@@ -5,8 +5,11 @@ export type Box = Size & { left: number; top: number };
 export type ExpandedTable = Size & { surface: Box; seats: Box[] };
 
 const gap = 8;
-const labelHeight = (name: string, width: number) =>
-  Math.max(44, Math.ceil((name.length * 8) / (width - 16)) * 18 + 12);
+const labelHeight = (name: string, width: number, compact: boolean) =>
+  Math.max(
+    44,
+    Math.ceil((name.length * (compact ? 7 : 8)) / (width - 20)) * 18 + 16,
+  );
 
 // These are the same seats, in the same order and orientation as the room plan.
 // Only their dimensions and spacing change when names replace initials.
@@ -15,6 +18,9 @@ export function expandTable(
   guests: Guest[],
   viewport: Size,
 ): ExpandedTable {
+  const compact = viewport.width <= 480;
+  const seatHeight = (name: string, width: number) =>
+    labelHeight(name, width, compact);
   const name = (seat: number) =>
     guests.find((g) => g.tableId === table.id && g.seat === seat)?.name ??
     'Disponible';
@@ -26,12 +32,12 @@ export function expandTable(
     const seatWidth = (width - 3 * gap) / 4;
     const headWidth = Math.min(110, width * 0.25);
     const rowHeight = Math.max(
-      ...[1, 2, 3, 4, 5, 6, 7, 8].map((s) => labelHeight(name(s), seatWidth)),
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((s) => seatHeight(name(s), seatWidth)),
     );
     const surfaceHeight = Math.max(
-      64,
-      labelHeight(name(0), headWidth),
-      labelHeight(name(9), headWidth),
+      104,
+      seatHeight(name(0), headWidth),
+      seatHeight(name(9), headWidth),
     );
     const height = 2 * (rowHeight + gap) + surfaceHeight;
     const surface = {
@@ -58,35 +64,35 @@ export function expandTable(
     });
     return { width, height, surface, seats };
   }
-  const surfaceWidth = 64;
+  const surfaceWidth = compact ? 88 : 96;
   const seatWidth = (width - surfaceWidth - 2 * gap) / 2;
   if (table.id === 'couple') {
-    const seatHeight = Math.max(
-      labelHeight(name(0), seatWidth),
-      labelHeight(name(1), seatWidth),
+    const rowHeight = Math.max(
+      seatHeight(name(0), seatWidth),
+      seatHeight(name(1), seatWidth),
     );
-    const height = 2 * seatHeight + gap;
+    const height = 2 * rowHeight + gap;
     return {
       width,
       height,
       surface: { left: seatWidth + gap, top: 0, width: surfaceWidth, height },
       seats: [0, 1].map((seat) => ({
         left: width - seatWidth,
-        top: seat * (seatHeight + gap),
+        top: seat * (rowHeight + gap),
         width: seatWidth,
-        height: seatHeight,
+        height: rowHeight,
       })),
     };
   }
   const rowHeights = [1, 2, 3, 4].map((seat) =>
     Math.max(
-      labelHeight(name(seat), seatWidth),
-      labelHeight(name(seat + 4), seatWidth),
+      seatHeight(name(seat), seatWidth),
+      seatHeight(name(seat + 4), seatWidth),
     ),
   );
   const headHeight = Math.max(
-    labelHeight(name(0), seatWidth),
-    labelHeight(name(9), seatWidth),
+    seatHeight(name(0), seatWidth),
+    seatHeight(name(9), seatWidth),
   );
   const surfaceHeight =
     rowHeights.reduce((sum, height) => sum + height, 0) + 3 * gap;

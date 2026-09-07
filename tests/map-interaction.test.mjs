@@ -102,6 +102,31 @@ test('every edge table remains reachable and fits in phone and desktop views at 
   }
 });
 
+test('focused tables reserve room for their controls and grow for long guest names', () => {
+  for (const width of [286, 358, 480, 840]) {
+    for (const table of tables) {
+      const view = { width, height: 400 };
+      const normal = expandTable(table, initialGuests, view);
+      if (table.horizontal) assert.ok(normal.surface.height >= 104);
+      else assert.ok(normal.surface.width >= 88);
+      const longNames = Array.from({ length: table.capacity }, (_, seat) => ({
+        id: `long-${seat}`,
+        name: 'María Alejandra '.repeat(4).trim(),
+        tableId: table.id,
+        seat,
+      }));
+      const expanded = expandTable(table, longNames, view);
+      assert.ok(expanded.height > normal.height);
+      assert.ok(expanded.width <= width - 24);
+      for (const [index, seat] of expanded.seats.entries()) {
+        assert.ok(!overlaps(seat, expanded.surface));
+        for (const other of expanded.seats.slice(index + 1))
+          assert.ok(!overlaps(seat, other));
+      }
+    }
+  }
+});
+
 function setup() {
   const events = new EventTarget(),
     frames = new Map(),

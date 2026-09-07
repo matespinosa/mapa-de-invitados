@@ -78,8 +78,8 @@ export function watchGuestDrag(
             : Number(element.dataset.seatIndex),
       };
     },
-    requestFrame: requestAnimationFrame,
-    cancelFrame: cancelAnimationFrame,
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    cancelFrame: (id) => window.cancelAnimationFrame(id),
   },
 ) {
   let frame = 0;
