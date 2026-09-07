@@ -2864,6 +2864,30 @@ h1 > span {
 .export-error { color: #a03838; }
 .export-spinner { animation: export-spin 1s linear infinite; }
 @keyframes export-spin { to { transform: rotate(360deg); } }
+.reset-trigger {
+  background: #f5eff8;
+  border: 1px solid #ddcfe4;
+  color: #744982;
+  white-space: nowrap;
+}
+.reset-trigger:hover {
+  background: #eadcf1;
+  border-color: #c3a6d0;
+  color: #63396e;
+}
+.reset-dialog {
+  width: min(430px, calc(100vw - 32px));
+  max-width: 430px !important;
+  padding: 24px !important;
+  gap: 14px !important;
+}
+.reset-dialog-media {
+  background: #f6edf8;
+  color: #744480;
+  border-radius: 12px;
+}
+.reset-confirm-action { background: #744480; color: white; }
+.reset-confirm-action:hover { background: #63396e; color: white; }
 @media (max-width: 1100px) {
   .header-actions .save-status { display: none; }
 }
@@ -2872,8 +2896,36 @@ h1 > span {
   .header-actions { gap: 8px; }
   .reference-button { width: 36px; padding: 0; font-size: 0; gap: 0; }
   .export-trigger { height: 36px; padding: 0 10px; font-size: 14px; gap: 6px; }
+  .reset-trigger { width: 36px; padding: 0; gap: 0; }
+  .reset-trigger > span { display: none; }
   .export-dialog { padding: 24px; }
   .export-option { padding: 14px; gap: 10px; }
+  .reset-dialog {
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    border-radius: 22px 22px 0 0 !important;
+    padding: 24px 20px calc(20px + env(safe-area-inset-bottom)) !important;
+    gap: 14px !important;
+  }
+  .reset-dialog [data-slot='alert-dialog-header'] {
+    display: block;
+    text-align: left;
+  }
+  .reset-dialog [data-slot='alert-dialog-media'] { margin: 0 0 12px; }
+  .reset-dialog [data-slot='alert-dialog-footer'] {
+    display: flex !important;
+    flex-direction: column !important;
+    margin-top: 4px;
+  }
+  .reset-dialog [data-slot='alert-dialog-cancel'],
+  .reset-dialog [data-slot='alert-dialog-action'] {
+    width: 100%;
+    min-height: 46px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .export-spinner { animation: none; }

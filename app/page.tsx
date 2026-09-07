@@ -37,6 +37,7 @@ import {
   Download,
   FileText,
   LoaderCircle,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Dialog,
@@ -67,7 +68,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
 import {
   initialGuests,
-  migrateLegacyDefault,
   tables,
   moveGuest,
   validateGuests,
@@ -82,7 +82,10 @@ import {
   watchGuestDrag,
   type GuestPointer,
 } from './guest-drag';
-const STORAGE_KEY = 'ensulugar-recepcion-v1';
+// v2 starts from the latest project template. Future edits stay in this key.
+// The previous key is intentionally left untouched so an older local draft is
+// never mistaken for the current default after the template changes.
+const STORAGE_KEY = 'ensulugar-recepcion-v2';
 const initials = (name: string) =>
   name
     .split(' ')
@@ -115,6 +118,18 @@ const createGuestId = (guests: readonly Guest[]) => {
   while (used.has(candidate)) candidate = `${prefix}-${suffix++}`;
   return candidate;
 };
+const sameRoster = (left: readonly Guest[], right: readonly Guest[]) => {
+  if (left.length !== right.length) return false;
+  const rightById = new Map(right.map((guest) => [guest.id, guest]));
+  return left.every((guest) => {
+    const baseline = rightById.get(guest.id);
+    return (
+      baseline?.name === guest.name &&
+      baseline.tableId === guest.tableId &&
+      baseline.seat === guest.seat
+    );
+  });
+};
 export default function Home() {
   const [guests, setGuests] = useState<Guest[]>(initialGuests),
     [history, setHistory] = useState<Guest[][]>([]);
@@ -127,6 +142,7 @@ export default function Home() {
   const [referenceOpen, setReferenceOpen] = useState(false),
     [helpOpen, setHelpOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null);
   const [exportError, setExportError] = useState('');
   const [dragging, setDragging] = useState<string | null>(null),
@@ -200,6 +216,7 @@ export default function Home() {
       ? guests.filter((g) => g.tableId === focusedTable.id)
       : [],
     pendingDelete = guests.find((g) => g.id === pendingDeleteId);
+  const hasRosterChanges = !sameRoster(guests, initialGuests);
   const expandedTable = dragging ? undefined : focusedTable;
   const expandedLayout = expandedTable
     ? expandTable(expandedTable, guests, viewport)
@@ -265,7 +282,7 @@ export default function Home() {
       const draft = localStorage.getItem(STORAGE_KEY);
       if (draft) {
         const parsed = JSON.parse(draft);
-        if (validateGuests(parsed)) setGuests(migrateLegacyDefault(parsed));
+        if (validateGuests(parsed)) setGuests(parsed);
       }
     } catch {
       setSaved(false);
@@ -281,6 +298,20 @@ export default function Home() {
       setSaved(false);
     }
   }, [guests, ready]);
+  function resetToOriginal() {
+    setGuests(initialGuests.map((guest) => ({ ...guest })));
+    setHistory([]);
+    setSelectedTable(null);
+    setSelectedGuest(null);
+    setFocusedTableId(null);
+    setFocusedGuestId(null);
+    setMovingGuestId(null);
+    setDragging(null);
+    setDropTarget(null);
+    setDropSeat(null);
+    setResetOpen(false);
+    setToast('Distribución original restaurada');
+  }
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 4200);
@@ -800,6 +831,16 @@ export default function Home() {
             <Download size={16} />
             Exportar
           </button>
+          <button
+            className="button light reset-trigger"
+            disabled={!ready || !hasRosterChanges}
+            aria-label="Restablecer distribución original"
+            title="Restablecer distribución original"
+            onClick={() => setResetOpen(true)}
+          >
+            <RotateCcw size={16} />
+            <span>Restablecer originales</span>
+          </button>
           <span className={`save-status ${!saved ? 'save-error' : ''}`}>
             <CheckCircle2 size={14} />
             {saved ? 'Guardado en este dispositivo' : 'No se pudo guardar'}
@@ -891,6 +932,32 @@ export default function Home() {
           )}
         </DialogContent>
       </Dialog>
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent className="reset-dialog" size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="reset-dialog-media">
+              <RotateCcw size={20} />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              ¿Restablecer la distribución original?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se reemplazarán los cambios guardados, incluyendo personas
+              agregadas, eliminadas o movidas, por la plantilla original del
+              proyecto. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="reset-confirm-action"
+              onClick={resetToOriginal}
+            >
+              Restablecer originales
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="workspace">
         <aside
           className={`guest-panel ${mobilePanel ? 'mobile-open' : ''} ${selected && selected.name.length > 12 ? 'has-long-table-title' : ''}`}
