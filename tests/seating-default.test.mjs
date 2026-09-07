@@ -28,10 +28,10 @@ test('the default seating matches the supplied reception plan', () => {
     'Samuel',
     'Vicente',
     'Luis',
-    'Efraín',
+    'Tefa',
     'Mariana',
     'Blanca',
-    'Mabel',
+    'Anaid',
     'Julio',
     'Betty',
   ]);

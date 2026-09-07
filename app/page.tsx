@@ -82,9 +82,8 @@ import {
   watchGuestDrag,
   type GuestPointer,
 } from './guest-drag';
-// v2 starts from the latest project template. Future edits stay in this key.
-// The previous key is intentionally left untouched so an older local draft is
-// never mistaken for the current default after the template changes.
+// v2 stores edits on this device. A draft that still matches the previous
+// starter template is treated as stale and replaced with the current plan.
 const STORAGE_KEY = 'ensulugar-recepcion-v2';
 const initials = (name: string) =>
   name
@@ -130,6 +129,10 @@ const sameRoster = (left: readonly Guest[], right: readonly Guest[]) => {
     );
   });
 };
+const previousTemplate = initialGuests.map((guest) => ({
+  ...guest,
+  name: guest.id === 'g5' ? 'Efraín' : guest.id === 'g8' ? 'Mabel' : guest.name,
+}));
 export default function Home() {
   const [guests, setGuests] = useState<Guest[]>(initialGuests),
     [history, setHistory] = useState<Guest[][]>([]);
@@ -282,7 +285,9 @@ export default function Home() {
       const draft = localStorage.getItem(STORAGE_KEY);
       if (draft) {
         const parsed = JSON.parse(draft);
-        if (validateGuests(parsed)) setGuests(parsed);
+        if (validateGuests(parsed) && !sameRoster(parsed, previousTemplate)) {
+          setGuests(parsed);
+        }
       }
     } catch {
       setSaved(false);
