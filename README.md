@@ -12,6 +12,7 @@ Organizador de recepción en React y TypeScript, basado en el diagrama proporcio
   quítalas de la mesa sin borrarlas del evento o elimínalas con confirmación.
 - Búsqueda, filtro de personas sin mesa, vista por mesa, zoom y deshacer (40 cambios por sesión).
 - El borrador se guarda en localStorage únicamente en ese navegador. No hay sincronización entre dispositivos.
+- «Exportar» permite descargar una imagen PNG del plano completo y del listado por mesa, o abrir la impresión para elegir «Guardar como PDF» en páginas A4. Usa la distribución actual, con nombres editados, lugares numerados, puestos disponibles y personas sin mesa, independientemente del zoom o los filtros. Los archivos se generan en el navegador, sin servidor ni servicios externos, también en GitHub Pages.
 
 ## Desarrollo
 

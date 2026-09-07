@@ -19,7 +19,6 @@ import {
   Heart,
   Wine,
   CakeSlice,
-  DoorOpen,
   Minus,
   Plus,
   Maximize,
@@ -35,6 +34,9 @@ import {
   ArrowLeftRight,
   Trash2,
   UserRoundMinus,
+  Download,
+  FileText,
+  LoaderCircle,
 } from 'lucide-react';
 import {
   Dialog,
@@ -65,6 +67,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
 import {
   initialGuests,
+  migrateLegacyDefault,
   tables,
   moveGuest,
   validateGuests,
@@ -72,6 +75,7 @@ import {
   type Table,
 } from './seating';
 import { expandTable, fitRoom, revealAxis, roomGeometry } from './map-layout';
+import { downloadSeatingPng, printSeatingPdf } from './seating-export';
 import {
   captureGuestPointer,
   releaseGuestPointer,
@@ -122,6 +126,9 @@ export default function Home() {
     [editTable, setEditTable] = useState('none');
   const [referenceOpen, setReferenceOpen] = useState(false),
     [helpOpen, setHelpOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null);
+  const [exportError, setExportError] = useState('');
   const [dragging, setDragging] = useState<string | null>(null),
     [dropTarget, setDropTarget] = useState<string | null>(null),
     [dropSeat, setDropSeat] = useState<number | null>(null);
@@ -157,6 +164,28 @@ export default function Home() {
   const pointer = useRef<GuestPointer | null>(null);
   const suppressClick = useRef(0);
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  async function exportDistribution(format: 'png' | 'pdf') {
+    if (exporting) return;
+    setExporting(format);
+    setExportError('');
+    try {
+      if (format === 'png') await downloadSeatingPng(guests);
+      else await printSeatingPdf(guests);
+      setToast(
+        format === 'png'
+          ? 'Imagen lista. Revisa las descargas de tu navegador.'
+          : 'Elige «Guardar como PDF» en la ventana de impresión.',
+      );
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo exportar. Intenta de nuevo.',
+      );
+    } finally {
+      setExporting(null);
+    }
+  }
   function startPointer(e: React.PointerEvent, id: string) {
     captureGuestPointer(e, e.currentTarget as HTMLElement, id, pointer);
   }
@@ -236,7 +265,7 @@ export default function Home() {
       const draft = localStorage.getItem(STORAGE_KEY);
       if (draft) {
         const parsed = JSON.parse(draft);
-        if (validateGuests(parsed)) setGuests(parsed);
+        if (validateGuests(parsed)) setGuests(migrateLegacyDefault(parsed));
       }
     } catch {
       setSaved(false);
@@ -760,6 +789,17 @@ export default function Home() {
           <span className="event-tag">Planeación</span>
         </div>
         <div className="header-actions">
+          <button
+            className="button export-trigger"
+            disabled={!ready}
+            onClick={() => {
+              setExportError('');
+              setExportOpen(true);
+            }}
+          >
+            <Download size={16} />
+            Exportar
+          </button>
           <span className={`save-status ${!saved ? 'save-error' : ''}`}>
             <CheckCircle2 size={14} />
             {saved ? 'Guardado en este dispositivo' : 'No se pudo guardar'}
@@ -781,8 +821,80 @@ export default function Home() {
           </button>
         </div>
       </header>
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="export-dialog" showCloseButton={false}>
+          <DialogClose
+            className="dialog-close-button"
+            aria-label="Cerrar exportación"
+          >
+            <X size={20} />
+          </DialogClose>
+          <DialogTitle>Guardar distribución</DialogTitle>
+          <DialogDescription>
+            El plano completo con las personas en sus lugares y, debajo, el
+            listado por mesa con nombres completos. Incluye a quienes siguen sin
+            mesa.
+          </DialogDescription>
+          <div className="export-summary">
+            {guestCount} personas · {seated} con lugar · {unassigned} sin mesa
+          </div>
+          <button
+            className="export-option"
+            disabled={exporting !== null}
+            onClick={() => void exportDistribution('png')}
+          >
+            {exporting === 'png' ? (
+              <LoaderCircle className="export-spinner" size={24} />
+            ) : (
+              <ImageIcon size={24} />
+            )}
+            <span>
+              <strong>
+                {exporting === 'png'
+                  ? 'Preparando imagen…'
+                  : 'Descargar imagen PNG'}
+              </strong>
+              <small>Un solo archivo para guardar o compartir.</small>
+            </span>
+            <Download size={18} />
+          </button>
+          <button
+            className="export-option"
+            disabled={exporting !== null}
+            onClick={() => void exportDistribution('pdf')}
+          >
+            {exporting === 'pdf' ? (
+              <LoaderCircle className="export-spinner" size={24} />
+            ) : (
+              <FileText size={24} />
+            )}
+            <span>
+              <strong>
+                {exporting === 'pdf' ? 'Preparando PDF…' : 'Guardar como PDF'}
+              </strong>
+              <small>
+                Elige «Guardar como PDF» al abrirse la impresión. Se organiza en
+                páginas A4.
+              </small>
+            </span>
+            <ChevronRight size={18} />
+          </button>
+          {exporting && (
+            <output className="export-progress">
+              Preparando la distribución actual…
+            </output>
+          )}
+          {exportError && (
+            <p role="alert" className="export-error">
+              {exportError}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
       <div className="workspace">
-        <aside className={`guest-panel ${mobilePanel ? 'mobile-open' : ''}`}>
+        <aside
+          className={`guest-panel ${mobilePanel ? 'mobile-open' : ''} ${selected && selected.name.length > 12 ? 'has-long-table-title' : ''}`}
+        >
           <div className="panel-heading">
             <h2>
               {selected ? selected.name : 'Tus invitados'}
@@ -879,7 +991,10 @@ export default function Home() {
               <button
                 key={g.id}
                 className={`guest-row ${!g.tableId ? 'unassigned-row' : ''}`}
-                onPointerDown={(e) => startPointer(e, g.id)}
+                onPointerDown={(e) => {
+                  if (!mobilePanel && e.pointerType !== 'touch')
+                    startPointer(e, g.id);
+                }}
                 draggable={false}
                 onDragStart={(e) => {
                   e.dataTransfer.setData('text/plain', g.id);
@@ -892,7 +1007,16 @@ export default function Home() {
                 }}
                 onClick={() => handleGuestClick(g)}
               >
-                <GripVertical size={14} className="drag-handle" />
+                <span
+                  className="drag-handle"
+                  aria-hidden="true"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    startPointer(e, g.id);
+                  }}
+                >
+                  <GripVertical size={14} />
+                </span>
                 <span className={`avatar tone-${toneIndex(g.id)}`}>
                   {initials(g.name)}
                 </span>
@@ -1081,10 +1205,6 @@ export default function Home() {
                   <div className="hall-outline">
                     <span className="hall-label">SALÓN DE RECEPCIÓN</span>
                     <div className="terrace-divider" />
-                    <div className="door-gap">
-                      <DoorOpen size={20} />
-                      <span>ENTRADA</span>
-                    </div>
                   </div>
                   <div className="bar-zone">
                     <Wine size={17} />
@@ -1182,17 +1302,6 @@ export default function Home() {
           </div>
         </section>
       </div>
-      <footer className="workspace-footer">
-        <span>
-          <GripVertical size={15} />
-          Toca una inicial para ver los nombres; arrastra un nombre para
-          moverlo.
-        </span>
-        <span>
-          <Heart size={13} />
-          Hecho para reunir
-        </span>
-      </footer>
       {dragging && (
         <div
           className="drag-preview"

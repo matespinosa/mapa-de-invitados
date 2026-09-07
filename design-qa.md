@@ -6,7 +6,7 @@ final result: passed
 
 - Source visual truth: `public/plano-original.jpg` (945 × 713 pixels).
 - The user requested a modern React app based on the reception layout, rather than a pixel copy of the raster photo. The source governs furniture grouping, relative positions, fixed zones and guest names; app chrome, colors, type and interactive seat controls are intentional adaptations.
-- The 10 tables, central empty table, bar between the two upper tables, two W.C. zones, five columns, central cake, couple table at the right, and bottom-left entry are preserved. Table capacity is interpreted as 10 each, plus 2 for the couple (102 total); 89 transcribed names and one unnamed guest make 90 records. Transcription is explicitly marked approximate and editable.
+- The 10 tables, central empty table, bar between the two upper tables, two W.C. zones, five columns, central cake, and couple table at the right are preserved. Table capacity is interpreted as 10 each, plus 2 for the couple (102 total); 89 transcribed names and one unnamed guest make 90 records. Transcription is explicitly marked approximate and editable.
 
 ## Evidence
 

@@ -33,23 +33,23 @@ export const tables: Table[] = [
 ];
 const names: Record<string, string[]> = {
   t1: [
+    'Daniela',
     'Samuel',
     'Vicente',
     'Luis',
     'Efraín',
-    'Daniela',
     'Mariana',
-    'Eliana',
+    'Blanca',
     'Mabel',
     'Julio',
-    'Pedro',
+    'Betty',
   ],
   t2: [
+    'Juan David',
     'Gary',
-    'Yessi',
+    'Jessica',
     'Camila',
     'Nicolás',
-    'Juan David',
     'Elías',
     'Fernanda',
     'Dayana',
@@ -86,7 +86,7 @@ const names: Record<string, string[]> = {
     'Miguel',
     'Jaime',
     'Aleja',
-    'Salomé',
+    'Sabine',
     'Malú',
     'Adriana',
   ],
@@ -152,6 +152,48 @@ while (initialGuests.length < 90)
     tableId: null,
     seat: null,
   });
+
+// The previous release shipped the same plan with a few names in the wrong
+// seats. Migrate only that untouched starter roster; a real user's edits are
+// left exactly as they were.
+const legacyDefaultNames: Record<string, string> = {
+  't1:0': 'Samuel',
+  't1:1': 'Vicente',
+  't1:2': 'Luis',
+  't1:3': 'Efraín',
+  't1:4': 'Daniela',
+  't1:5': 'Mariana',
+  't1:6': 'Eliana',
+  't1:7': 'Mabel',
+  't1:8': 'Julio',
+  't1:9': 'Pedro',
+  't2:0': 'Gary',
+  't2:1': 'Yessi',
+  't2:2': 'Camila',
+  't2:3': 'Nicolás',
+  't2:4': 'Juan David',
+  't2:5': 'Elías',
+  't2:6': 'Fernanda',
+  't2:7': 'Dayana',
+  't6:7': 'Salomé',
+};
+export function migrateLegacyDefault(value: readonly Guest[]): Guest[] {
+  if (value.length !== initialGuests.length) return [...value];
+  const byId = new Map(value.map((guest) => [guest.id, guest]));
+  const isUntouchedLegacyDefault = initialGuests.every((expected) => {
+    const actual = byId.get(expected.id);
+    if (!actual) return false;
+    const key = `${expected.tableId}:${expected.seat}`;
+    return (
+      actual.tableId === expected.tableId &&
+      actual.seat === expected.seat &&
+      actual.name === (legacyDefaultNames[key] ?? expected.name)
+    );
+  });
+  return isUntouchedLegacyDefault
+    ? initialGuests.map((guest) => ({ ...guest }))
+    : [...value];
+}
 export function validateGuests(value: unknown): value is Guest[] {
   if (!Array.isArray(value)) return false;
   const ids = new Set<string>(),
