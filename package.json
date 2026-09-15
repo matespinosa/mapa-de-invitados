@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
+    "dev:lan": "vinext dev --hostname 0.0.0.0",
     "build": "vinext build",
     "prepare:pages": "node scripts/prepare-github-pages.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",

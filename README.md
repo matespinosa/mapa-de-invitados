@@ -22,6 +22,17 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
+Para abrir la app desde un iPad en la misma red Wi‑Fi, inicia el servidor
+escuchando en la red local:
+
+```sh
+npm run dev:lan -- --port 3000
+```
+
+Después abre `http://IP-DE-ESTE-MAC:3000/` en el iPad (por ejemplo,
+`http://192.168.20.104:3000/`). El servidor debe seguir ejecutándose y el Mac y
+el iPad deben permanecer conectados a la misma red.
+
 ```sh
 npx tsc --noEmit
 npm run build
