@@ -29,6 +29,10 @@ import {
   CircleHelp,
   Pencil,
   CheckCircle2,
+  Cloud,
+  CloudOff,
+  LogIn,
+  LogOut,
   UserRound,
   MapPin,
   ArrowLeftRight,
@@ -74,7 +78,6 @@ import {
   type Meal,
   tables,
   moveGuest,
-  validateGuests,
   type Guest,
   type Table,
 } from './seating';
@@ -95,8 +98,8 @@ import {
   watchGuestDrag,
   type GuestPointer,
 } from './guest-drag';
-// Keep the previous draft under v2; this PDF revision starts a fresh saved plan.
-const STORAGE_KEY = 'ensulugar-recepcion-v3-pdf-20260919';
+import { signInWithGoogle, signOutOfGoogle } from './cloud-plan';
+import { usePlanPersistence } from './use-plan-persistence';
 const initials = (name: string) =>
   name
     .split(' ')
@@ -143,8 +146,17 @@ const sameRoster = (left: readonly Guest[], right: readonly Guest[]) => {
   });
 };
 export default function Home() {
-  const [guests, setGuests] = useState<Guest[]>(initialGuests),
-    [history, setHistory] = useState<Guest[][]>([]);
+  const {
+    guests,
+    setGuests,
+    account,
+    ready,
+    saveState,
+    saveError,
+    retryCloud,
+    cloudConfigured,
+  } = usePlanPersistence();
+  const [history, setHistory] = useState<Guest[][]>([]);
   const [query, setQuery] = useState(''),
     [filter, setFilter] = useState('all'),
     [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -173,9 +185,8 @@ export default function Home() {
     [addPersonSeat, setAddPersonSeat] = useState<number | null>(null),
     [addFromTableId, setAddFromTableId] = useState<string | null>(null),
     [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [toast, setToast] = useState(''),
-    [ready, setReady] = useState(false),
-    [saved, setSaved] = useState(true);
+  const [toast, setToast] = useState('');
+  const [accountBusy, setAccountBusy] = useState(false);
   const [zoom, setZoom] = useState(1),
     [viewport, setViewport] = useState({ width: 840, height: 680 }),
     [mobilePanel, setMobilePanel] = useState(false),
@@ -254,7 +265,7 @@ export default function Home() {
       setHistory((h) => [...h.slice(-39), guests]);
       setGuests(next);
     },
-    [guests],
+    [guests, setGuests],
   );
   const assign = useCallback(
     (id: string, target: string | null, seat?: number): boolean => {
@@ -285,28 +296,36 @@ export default function Home() {
     [cancelMove, commit, guests],
   );
   useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setHistory([]);
+      setSelectedGuest(null);
+      setSelectedTable(null);
+      setOpenTables([]);
+      cancelMove();
+    });
+    return () => { active = false; };
+  }, [account?.uid, cancelMove]);
+
+  async function changeAccount() {
+    if (accountBusy) return;
+    setAccountBusy(true);
     try {
-      const draft = localStorage.getItem(STORAGE_KEY);
-      if (draft) {
-        const parsed = JSON.parse(draft);
-        if (validateGuests(parsed)) {
-          setGuests(parsed);
-        }
+      if (account) await signOutOfGoogle();
+      else await signInWithGoogle();
+    } catch (cause) {
+      const code = typeof cause === 'object' && cause !== null && 'code' in cause
+        ? String(cause.code) : '';
+      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
+        setToast(
+          cause instanceof Error ? cause.message : 'No se pudo cambiar la cuenta de Google.',
+        );
       }
-    } catch {
-      setSaved(false);
+    } finally {
+      setAccountBusy(false);
     }
-    setReady(true);
-  }, []);
-  useEffect(() => {
-    if (!ready) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(guests));
-      setSaved(true);
-    } catch {
-      setSaved(false);
-    }
-  }, [guests, ready]);
+  }
   function resetToOriginal() {
     setGuests(initialGuests.map((guest) => ({ ...guest })));
     setHistory([]);
@@ -833,7 +852,7 @@ export default function Home() {
   }
   return (
     <main
-      className={`app-shell ${mapOnly ? 'map-only' : ''} ${
+      className={`app-shell ${cloudConfigured ? 'cloud-enabled' : ''} ${mapOnly ? 'map-only' : ''} ${
         boardTables.length ? 'has-board' : ''
       } ${boardTables.length > 1 ? 'has-two' : ''}`}
     >
@@ -871,10 +890,10 @@ export default function Home() {
             <RotateCcw size={16} />
             <span>Restablecer originales</span>
           </button>
-          <span className={`save-status ${!saved ? 'save-error' : ''}`}>
+          {!cloudConfigured && <span className={`save-status ${saveState === 'error' ? 'save-error' : ''}`}>
             <CheckCircle2 size={14} />
-            {saved ? 'Guardado en este dispositivo' : 'No se pudo guardar'}
-          </span>
+            {saveState === 'error' ? 'No se pudo guardar' : 'Guardado en este dispositivo'}
+          </span>}
           <button
             className="button light reference-button"
             onClick={() => setReferenceOpen(true)}
@@ -892,6 +911,31 @@ export default function Home() {
           </button>
         </div>
       </header>
+      {cloudConfigured && (
+        <div className="cloud-bar">
+          <output className={`cloud-indicator ${saveState === 'error' ? 'cloud-error' : ''}`} aria-live="polite">
+            {saveState === 'saving' || saveState === 'loading' ? <LoaderCircle size={16} className="export-spinner" /> :
+              saveState === 'error' ? <CloudOff size={16} /> : <Cloud size={16} />}
+            <span>{saveState === 'loading' ? 'Abriendo tu plano…' :
+              saveState === 'saving' ? 'Guardando en Google…' :
+              saveState === 'cloud' ? 'Guardado en tu cuenta de Google' :
+              saveState === 'error' ? 'No se pudo sincronizar' :
+              'Guardado solo en este dispositivo'}</span>
+          </output>
+          {saveState === 'error' && (
+            <>
+              <span className="cloud-error-detail" title={saveError}>{saveError}</span>
+              <button className="cloud-retry" onClick={retryCloud}>Reintentar</button>
+            </>
+          )}
+          {account && <span className="cloud-account" title={account.email ?? ''}>{account.displayName || account.email}</span>}
+          <button className="button cloud-account-button" disabled={accountBusy} onClick={() => void changeAccount()}>
+            {account ? <LogOut size={16} /> : <LogIn size={16} />}
+            <span className="cloud-button-long">{account ? 'Salir de Google' : 'Entrar con Google'}</span>
+            <span className="cloud-button-short">{account ? 'Salir' : 'Entrar'}</span>
+          </button>
+        </div>
+      )}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="export-dialog" showCloseButton={false}>
           <DialogClose
@@ -989,10 +1033,16 @@ export default function Home() {
         </AlertDialogContent>
       </AlertDialog>
       <div
-        className={`workspace ${boardTables.length ? 'with-board' : ''} ${
+        className={`workspace ${!ready ? 'workspace-loading' : ''} ${boardTables.length ? 'with-board' : ''} ${
           boardTables.length > 1 ? 'with-two' : ''
         }`}
       >
+        {!ready && (
+          <output className="workspace-loading-cover">
+            <LoaderCircle size={26} className="export-spinner" />
+            <span>{saveState === 'error' ? 'Revisa la conexión y toca «Reintentar».' : 'Abriendo tu plano…'}</span>
+          </output>
+        )}
         <aside
           className={`guest-panel ${mobilePanel ? 'mobile-open' : ''} ${selected && selected.name.length > 12 ? 'has-long-table-title' : ''}`}
         >
@@ -1860,8 +1910,10 @@ export default function Home() {
             </div>
           </div>
           <p className="local-note">
-            Los cambios se guardan solo en este navegador. Puedes deshacer los
-            últimos cambios durante la sesión.
+            {account
+              ? 'Tu plano se guarda en tu cuenta de Google y se abre en tus dispositivos al entrar con la misma cuenta.'
+              : 'Los cambios se guardan solo en este navegador. Entra con Google para tener un plano propio en todos tus dispositivos.'}
+            {' '}Puedes deshacer los últimos cambios durante la sesión.
           </p>
         </DialogContent>
       </Dialog>

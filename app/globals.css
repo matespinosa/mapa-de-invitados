@@ -191,6 +191,78 @@ a {
 .save-status svg {
   color: #7d9c87;
 }
+.cloud-bar {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 34px;
+  background: #fcf9fd;
+  border-bottom: 1px solid #e9dfec;
+  color: #715c78;
+  font-size: 12px;
+}
+.cloud-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-weight: 600;
+}
+.cloud-indicator svg { color: #688574; }
+.cloud-indicator.cloud-error,
+.cloud-indicator.cloud-error svg,
+.cloud-error-detail { color: #a04545; }
+.cloud-error-detail {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+.cloud-retry {
+  background: none;
+  border: 0;
+  padding: 5px;
+  color: #744480;
+  text-decoration: underline;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cloud-account {
+  margin-left: auto;
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cloud-account-button {
+  height: 32px;
+  padding-inline: 10px;
+  color: #744480;
+  border-color: #ddcfe4;
+  font-size: 12px;
+}
+.cloud-button-short { display: none; }
+.cloud-bar:not(:has(.cloud-account)) .cloud-account-button {
+  margin-left: auto;
+}
+.workspace-loading { position: relative; }
+.workspace-loading > :not(.workspace-loading-cover) { pointer-events: none; }
+.workspace-loading-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  background: #fbf8fc;
+  border-radius: 13px;
+  color: #684574;
+  font-size: 14px;
+  font-weight: 600;
+}
 .save-error {
   color: #b45309;
 }
@@ -1798,6 +1870,7 @@ h1 > span {
     height: calc(100dvh - 116px);
     margin-top: 14px;
   }
+  .cloud-enabled .workspace { height: calc(100dvh - 164px); }
   .plan-toolbar {
     height: 50px;
   }
@@ -2008,6 +2081,7 @@ h1 > span {
   background: #f7f7f9;
 }
 .map-only .app-header,
+.map-only .cloud-bar,
 .map-only .guest-panel,
 .map-only .workspace-footer,
 .map-only .plan-stats,
@@ -2375,6 +2449,13 @@ h1 > span {
 }
 @media (max-width: 600px) {
   .app-header { padding-inline: 16px; gap: 12px; }
+  .cloud-bar { padding: 7px 16px; gap: 6px; flex-wrap: wrap; }
+  .cloud-indicator { font-size: 11px; }
+  .cloud-error-detail { max-width: calc(100vw - 180px); font-size: 11px; }
+  .cloud-account { display: none; }
+  .cloud-account-button { padding-inline: 8px; font-size: 11px; }
+  .cloud-button-long { display: none; }
+  .cloud-button-short { display: inline; }
   .header-actions { gap: 8px; }
   .reference-button { width: 36px; padding: 0; font-size: 0; gap: 0; }
   .export-trigger { height: 36px; padding: 0 10px; font-size: 14px; gap: 6px; }
