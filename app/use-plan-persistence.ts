@@ -9,6 +9,8 @@ import {
   writeCloudPlan,
 } from './cloud-plan';
 import { initialGuests, validateGuests, type Guest } from './seating';
+import { checkAccess, greetingName } from './allowed-accounts';
+import { rememberAccount } from './remembered-accounts';
 
 // Keep the previous draft under v2; this PDF revision starts a fresh saved plan.
 const STORAGE_KEY = 'ensulugar-recepcion-v3-pdf-20260919';
@@ -16,6 +18,17 @@ const accountKey = (uid: string) => `${STORAGE_KEY}:account:${uid}`;
 const pendingKey = (uid: string) => `${STORAGE_KEY}:pending:${uid}`;
 
 type SaveState = 'loading' | 'local' | 'saving' | 'cloud' | 'error';
+
+/** How far an account got towards the organizer. Only 'allowed' opens a plan. */
+export type AccessState =
+  | { status: 'checking' }
+  | { status: 'unconfigured' }
+  | { status: 'signed-out' }
+  | { status: 'not-google' }
+  | { status: 'unverified'; email: string }
+  | { status: 'denied'; email: string; name: string }
+  | { status: 'error'; message: string }
+  | { status: 'allowed'; name: string };
 
 function localDraft(key: string): Guest[] | null {
   const value = localStorage.getItem(key);
@@ -27,6 +40,9 @@ function localDraft(key: string): Guest[] | null {
 export function usePlanPersistence() {
   const [guests, setGuests] = useState<Guest[]>(initialGuests);
   const [account, setAccount] = useState<User | null>(null);
+  const [access, setAccess] = useState<AccessState>(
+    cloudConfigured ? { status: 'checking' } : { status: 'unconfigured' },
+  );
   const [ready, setReady] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('loading');
   const [saveError, setSaveError] = useState('');
@@ -54,18 +70,35 @@ export function usePlanPersistence() {
       setSaveError('');
 
       if (!user) {
-        try {
-          setGuests(localDraft(STORAGE_KEY) ?? initialGuests);
-          setSaveState('local');
-          setReady(true);
-        } catch {
-          setGuests(initialGuests);
-          setSaveError('No se pudo leer el borrador de este dispositivo.');
-          setSaveState('error');
-          setReady(true);
-        }
+        setAccess({ status: 'signed-out' });
         return;
       }
+
+      // Google is the only door, and only the people on the list go through it.
+      // A refused account keeps its session so the screen can say why, but no
+      // plan is read or written for it.
+      const verdict = checkAccess({
+        email: user.email,
+        emailVerified: user.emailVerified,
+        providers: user.providerData.map((entry) => entry.providerId),
+      });
+      if (verdict.status !== 'allowed') {
+        const email = user.email ?? '';
+        setAccess(
+          verdict.status === 'denied'
+            ? { status: 'denied', email, name: greetingName(user.displayName, '') }
+            : verdict.status === 'unverified'
+              ? { status: 'unverified', email }
+              : { status: 'not-google' },
+        );
+        return;
+      }
+
+      const name = greetingName(user.displayName, verdict.name);
+      setAccess({ status: 'allowed', name });
+      // Next time this device opens the app it can greet by name and go
+      // straight to this account instead of asking who is entering.
+      rememberAccount({ email: user.email ?? '', name, photo: user.photoURL });
 
       try {
         const remote = await readCloudPlan(user.uid);
@@ -100,6 +133,7 @@ export function usePlanPersistence() {
       const stop = watchAccount(loadAccount, (message) => {
         if (!alive) return;
         setReady(false);
+        setAccess({ status: 'error', message });
         setSaveError(message);
         setSaveState('error');
       });
@@ -110,7 +144,9 @@ export function usePlanPersistence() {
       };
     }
 
-    void loadAccount(null);
+    // Without Firebase there is no way to sign in, so the gate stays shut on the
+    // 'unconfigured' state it started with and the login screen explains what is
+    // missing instead of opening a plan.
     return () => {
       alive = false;
       generation++;
@@ -187,6 +223,7 @@ export function usePlanPersistence() {
     guests,
     setGuests,
     account,
+    access,
     ready,
     saveState,
     saveError,

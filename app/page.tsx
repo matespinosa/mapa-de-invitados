@@ -12,7 +12,6 @@ import {
   Search,
   LayoutGrid,
   Image as ImageIcon,
-  ArrowUpRight,
   Check,
   ChevronRight,
   GripVertical,
@@ -29,10 +28,7 @@ import {
   CircleHelp,
   Pencil,
   CheckCircle2,
-  Cloud,
   CloudOff,
-  LogIn,
-  LogOut,
   UserRound,
   MapPin,
   ArrowLeftRight,
@@ -41,7 +37,6 @@ import {
   Download,
   FileText,
   LoaderCircle,
-  RotateCcw,
 } from 'lucide-react';
 import {
   Dialog,
@@ -71,7 +66,6 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
 import {
-  initialGuests,
   mealLabels,
   mealLabel,
   mealSummary,
@@ -98,8 +92,11 @@ import {
   watchGuestDrag,
   type GuestPointer,
 } from './guest-drag';
-import { signInWithGoogle, signOutOfGoogle } from './cloud-plan';
 import { usePlanPersistence } from './use-plan-persistence';
+import LoginScreen from './login-screen';
+import AccountMenu from './account-menu';
+import HeaderMoreMenu from './header-more-menu';
+import { MealPicker } from './meal-picker';
 const initials = (name: string) =>
   name
     .split(' ')
@@ -132,30 +129,27 @@ const createGuestId = (guests: readonly Guest[]) => {
   while (used.has(candidate)) candidate = `${prefix}-${suffix++}`;
   return candidate;
 };
-const sameRoster = (left: readonly Guest[], right: readonly Guest[]) => {
-  if (left.length !== right.length) return false;
-  const rightById = new Map(right.map((guest) => [guest.id, guest]));
-  return left.every((guest) => {
-    const baseline = rightById.get(guest.id);
-    return (
-      baseline?.name === guest.name &&
-      baseline.tableId === guest.tableId &&
-      baseline.seat === guest.seat &&
-      (baseline.meal ?? null) === (guest.meal ?? null)
-    );
-  });
-};
+type PlanState = ReturnType<typeof usePlanPersistence>;
+
 export default function Home() {
+  const plan = usePlanPersistence();
+  // Google is the only door: nothing of the organizer exists until an account
+  // from the list is through it, so the plan never mounts for anyone else.
+  if (plan.access.status !== 'allowed')
+    return <LoginScreen access={plan.access} />;
+  return <Organizer plan={plan} name={plan.access.name} />;
+}
+
+function Organizer({ plan, name }: { plan: PlanState; name: string }) {
   const {
     guests,
     setGuests,
     account,
     ready,
     saveState,
-    saveError,
     retryCloud,
     cloudConfigured,
-  } = usePlanPersistence();
+  } = plan;
   const [history, setHistory] = useState<Guest[][]>([]);
   const [query, setQuery] = useState(''),
     [filter, setFilter] = useState('all'),
@@ -164,10 +158,8 @@ export default function Home() {
     [editName, setEditName] = useState(''),
     [editTable, setEditTable] = useState('none'),
     [editMeal, setEditMeal] = useState<Meal | 'pending'>('pending');
-  const [referenceOpen, setReferenceOpen] = useState(false),
-    [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [resetOpen, setResetOpen] = useState(false);
   const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null);
   const [exportError, setExportError] = useState('');
   const [dragging, setDragging] = useState<string | null>(null),
@@ -186,7 +178,6 @@ export default function Home() {
     [addFromTableId, setAddFromTableId] = useState<string | null>(null),
     [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
-  const [accountBusy, setAccountBusy] = useState(false);
   const [zoom, setZoom] = useState(1),
     [viewport, setViewport] = useState({ width: 840, height: 680 }),
     [mobilePanel, setMobilePanel] = useState(false),
@@ -238,7 +229,6 @@ export default function Home() {
     selected = tables.find((t) => t.id === selectedTable),
     movingGuest = guests.find((g) => g.id === movingGuestId),
     pendingDelete = guests.find((g) => g.id === pendingDeleteId);
-  const hasRosterChanges = !sameRoster(guests, initialGuests);
   const boardTables = openTables
     .map((id) => tables.find((t) => t.id === id))
     .filter((table): table is Table => !!table);
@@ -266,6 +256,17 @@ export default function Home() {
       setGuests(next);
     },
     [guests, setGuests],
+  );
+  const setMeal = useCallback(
+    (id: string, meal: Meal | null) => {
+      const person = guests.find((guest) => guest.id === id);
+      if (!person || (person.meal ?? null) === meal) return;
+      commit(
+        guests.map((guest) => (guest.id === id ? { ...guest, meal } : guest)),
+      );
+      setToast(`${person.name} · ${mealLabel(meal)}`);
+    },
+    [commit, guests],
   );
   const assign = useCallback(
     (id: string, target: string | null, seat?: number): boolean => {
@@ -305,40 +306,11 @@ export default function Home() {
       setOpenTables([]);
       cancelMove();
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [account?.uid, cancelMove]);
 
-  async function changeAccount() {
-    if (accountBusy) return;
-    setAccountBusy(true);
-    try {
-      if (account) await signOutOfGoogle();
-      else await signInWithGoogle();
-    } catch (cause) {
-      const code = typeof cause === 'object' && cause !== null && 'code' in cause
-        ? String(cause.code) : '';
-      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
-        setToast(
-          cause instanceof Error ? cause.message : 'No se pudo cambiar la cuenta de Google.',
-        );
-      }
-    } finally {
-      setAccountBusy(false);
-    }
-  }
-  function resetToOriginal() {
-    setGuests(initialGuests.map((guest) => ({ ...guest })));
-    setHistory([]);
-    setSelectedTable(null);
-    setSelectedGuest(null);
-    setOpenTables([]);
-    setMovingGuestId(null);
-    setDragging(null);
-    setDropTarget(null);
-    setDropSeat(null);
-    setResetOpen(false);
-    setToast('Distribución original restaurada');
-  }
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 4200);
@@ -427,8 +399,7 @@ export default function Home() {
         !addPersonOpen &&
         !pendingDeleteId &&
         !selectedGuest &&
-        !helpOpen &&
-        !referenceOpen
+        !helpOpen
       ) {
         releaseGuestPointer(pointer);
         cancelMove();
@@ -436,14 +407,7 @@ export default function Home() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    addPersonOpen,
-    cancelMove,
-    helpOpen,
-    pendingDeleteId,
-    referenceOpen,
-    selectedGuest,
-  ]);
+  }, [addPersonOpen, cancelMove, helpOpen, pendingDeleteId, selectedGuest]);
   function undo() {
     if (!history.length) return;
     releaseGuestPointer(pointer);
@@ -472,11 +436,17 @@ export default function Home() {
     if (!guest) return;
     setMovingGuestId(id);
     setMobilePanel(false);
-    if (revealTable && guest.tableId) setOpenTables((open) => openTable(open, guest.tableId!));
+    if (revealTable && guest.tableId)
+      setOpenTables((open) => openTable(open, guest.tableId!));
     setToast('');
   }
   // Tapping a seat row picks someone up, seats them, or swaps two people.
-  function tapSeat(tableId: string, seat: number, guest?: Guest, revealTable = true) {
+  function tapSeat(
+    tableId: string,
+    seat: number,
+    guest?: Guest,
+    revealTable = true,
+  ) {
     const action = rowAction(movingGuestId, { guest: guest ?? null });
     if (action === 'unpick') return cancelMove();
     if (action === 'pick') return beginMove(guest!.id, revealTable);
@@ -530,7 +500,16 @@ export default function Home() {
     const name = addPersonName.trim();
     if (!name) return;
     const id = createGuestId(guests);
-    const draft: Guest[] = [...guests, { id, name, tableId: null, seat: null, meal: addPersonMeal === 'pending' ? null : addPersonMeal }];
+    const draft: Guest[] = [
+      ...guests,
+      {
+        id,
+        name,
+        tableId: null,
+        seat: null,
+        meal: addPersonMeal === 'pending' ? null : addPersonMeal,
+      },
+    ];
     let next = draft;
     if (addPersonTable !== 'none') {
       const result = moveGuest(
@@ -560,19 +539,6 @@ export default function Home() {
         : `${name} agregado a la lista sin mesa`,
     );
   }
-  function removeFromTable(id: string) {
-    const guest = guests.find((candidate) => candidate.id === id);
-    if (!guest?.tableId) return;
-    commit(
-      guests.map((candidate) =>
-        candidate.id === id
-          ? { ...candidate, tableId: null, seat: null }
-          : candidate,
-      ),
-    );
-    if (movingGuestId === id) setMovingGuestId(null);
-    setToast(`${guest.name} quedó sin mesa`);
-  }
   function requestDelete(id: string) {
     setSelectedGuest(null);
     setPendingDeleteId(id);
@@ -601,7 +567,13 @@ export default function Home() {
     }
     commit(
       r.guests.map((g) =>
-        g.id === active.id ? { ...g, name: editName.trim(), meal: editMeal === 'pending' ? null : editMeal } : g,
+        g.id === active.id
+          ? {
+              ...g,
+              name: editName.trim(),
+              meal: editMeal === 'pending' ? null : editMeal,
+            }
+          : g,
       ),
     );
     setSelectedGuest(null);
@@ -716,11 +688,12 @@ export default function Home() {
               }
             >
               {guest ? initials(guest.name) : ''}
-              {guest && (movingGuestId === guest.id || pressedSeatId === guest.id) && (
-                <span className="seat-selection-mark" aria-hidden="true">
-                  <CheckCircle2 size={13} />
-                </span>
-              )}
+              {guest &&
+                (movingGuestId === guest.id || pressedSeatId === guest.id) && (
+                  <span className="seat-selection-mark" aria-hidden="true">
+                    <CheckCircle2 size={13} />
+                  </span>
+                )}
             </button>
           );
         })}
@@ -774,6 +747,14 @@ export default function Home() {
             <small>{guest ? `${mealLabel(guest.meal)} · ${hint}` : hint}</small>
           </span>
         </button>
+        {guest && !picked && (
+          <MealPicker
+            compact
+            value={guest.meal}
+            personName={guest.name}
+            onChange={(meal) => setMeal(guest.id, meal)}
+          />
+        )}
         {guest && !picked && (
           <button
             className="sr-edit"
@@ -852,7 +833,7 @@ export default function Home() {
   }
   return (
     <main
-      className={`app-shell ${cloudConfigured ? 'cloud-enabled' : ''} ${mapOnly ? 'map-only' : ''} ${
+      className={`app-shell ${mapOnly ? 'map-only' : ''} ${
         boardTables.length ? 'has-board' : ''
       } ${boardTables.length > 1 ? 'has-two' : ''}`}
     >
@@ -880,62 +861,42 @@ export default function Home() {
             <Download size={16} />
             Exportar
           </button>
-          <button
-            className="button light reset-trigger"
-            disabled={!ready || !hasRosterChanges}
-            aria-label="Restablecer distribución original"
-            title="Restablecer distribución original"
-            onClick={() => setResetOpen(true)}
-          >
-            <RotateCcw size={16} />
-            <span>Restablecer originales</span>
-          </button>
-          {!cloudConfigured && <span className={`save-status ${saveState === 'error' ? 'save-error' : ''}`}>
-            <CheckCircle2 size={14} />
-            {saveState === 'error' ? 'No se pudo guardar' : 'Guardado en este dispositivo'}
-          </span>}
-          <button
-            className="button light reference-button"
-            onClick={() => setReferenceOpen(true)}
-          >
-            <ImageIcon size={16} />
-            Ver foto original
-            <ArrowUpRight size={14} />
-          </button>
-          <button
-            className="icon-button help-button"
-            aria-label="Cómo usar el organizador"
-            onClick={() => setHelpOpen(true)}
-          >
-            <CircleHelp size={20} />
-          </button>
+          <div className="header-actions-full">
+            {(!cloudConfigured || saveState === 'error') && (
+              <span
+                className={`save-status ${saveState === 'error' ? 'save-error' : ''}`}
+              >
+                {saveState === 'error' ? (
+                  <CloudOff size={14} />
+                ) : (
+                  <CheckCircle2 size={14} />
+                )}
+                {saveState === 'error'
+                  ? 'No se pudo guardar'
+                  : 'Guardado en este dispositivo'}
+                {saveState === 'error' && cloudConfigured && (
+                  <button className="cloud-retry" onClick={retryCloud}>
+                    Reintentar
+                  </button>
+                )}
+              </span>
+            )}
+            <button
+              className="icon-button help-button"
+              aria-label="Cómo usar el organizador"
+              onClick={() => setHelpOpen(true)}
+            >
+              <CircleHelp size={20} />
+            </button>
+          </div>
+          <HeaderMoreMenu
+            canRetry={cloudConfigured && saveState === 'error'}
+            onHelp={() => setHelpOpen(true)}
+            onRetry={retryCloud}
+          />
+          {account && <AccountMenu account={account} name={name} />}
         </div>
       </header>
-      {cloudConfigured && (
-        <div className="cloud-bar">
-          <output className={`cloud-indicator ${saveState === 'error' ? 'cloud-error' : ''}`} aria-live="polite">
-            {saveState === 'saving' || saveState === 'loading' ? <LoaderCircle size={16} className="export-spinner" /> :
-              saveState === 'error' ? <CloudOff size={16} /> : <Cloud size={16} />}
-            <span>{saveState === 'loading' ? 'Abriendo tu plano…' :
-              saveState === 'saving' ? 'Guardando en Google…' :
-              saveState === 'cloud' ? 'Guardado en tu cuenta de Google' :
-              saveState === 'error' ? 'No se pudo sincronizar' :
-              'Guardado solo en este dispositivo'}</span>
-          </output>
-          {saveState === 'error' && (
-            <>
-              <span className="cloud-error-detail" title={saveError}>{saveError}</span>
-              <button className="cloud-retry" onClick={retryCloud}>Reintentar</button>
-            </>
-          )}
-          {account && <span className="cloud-account" title={account.email ?? ''}>{account.displayName || account.email}</span>}
-          <button className="button cloud-account-button" disabled={accountBusy} onClick={() => void changeAccount()}>
-            {account ? <LogOut size={16} /> : <LogIn size={16} />}
-            <span className="cloud-button-long">{account ? 'Salir de Google' : 'Entrar con Google'}</span>
-            <span className="cloud-button-short">{account ? 'Salir' : 'Entrar'}</span>
-          </button>
-        </div>
-      )}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="export-dialog" showCloseButton={false}>
           <DialogClose
@@ -1006,32 +967,6 @@ export default function Home() {
           )}
         </DialogContent>
       </Dialog>
-      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
-        <AlertDialogContent className="reset-dialog" size="sm">
-          <AlertDialogHeader>
-            <AlertDialogMedia className="reset-dialog-media">
-              <RotateCcw size={20} />
-            </AlertDialogMedia>
-            <AlertDialogTitle>
-              ¿Restablecer la distribución original?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Se reemplazarán los cambios guardados, incluyendo personas
-              agregadas, eliminadas o movidas, por la plantilla original del
-              proyecto. Esta acción no se puede deshacer.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="reset-confirm-action"
-              onClick={resetToOriginal}
-            >
-              Restablecer originales
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <div
         className={`workspace ${!ready ? 'workspace-loading' : ''} ${boardTables.length ? 'with-board' : ''} ${
           boardTables.length > 1 ? 'with-two' : ''
@@ -1039,8 +974,21 @@ export default function Home() {
       >
         {!ready && (
           <output className="workspace-loading-cover">
-            <LoaderCircle size={26} className="export-spinner" />
-            <span>{saveState === 'error' ? 'Revisa la conexión y toca «Reintentar».' : 'Abriendo tu plano…'}</span>
+            {saveState === 'error' ? (
+              <CloudOff size={26} />
+            ) : (
+              <LoaderCircle size={26} className="export-spinner" />
+            )}
+            <span>
+              {saveState === 'error'
+                ? 'No se pudo abrir el plano. Revisa la conexión.'
+                : 'Abriendo tu plano…'}
+            </span>
+            {saveState === 'error' && (
+              <button className="cloud-retry" onClick={retryCloud}>
+                Reintentar
+              </button>
+            )}
           </output>
         )}
         <aside
@@ -1084,7 +1032,8 @@ export default function Home() {
               : 'Buena compañía, bien ubicada.'}
           </p>
           <p className="menu-summary" aria-label="Resumen de menús">
-            {menus.chicken} pollo · {menus.beef} carne · {menus.vegetarian} vegetariano · {menus.pending} por confirmar
+            {menus.chicken} pollo · {menus.beef} carne · {menus.vegetarian}{' '}
+            vegetariano · {menus.pending} por confirmar
           </p>
           <label className="search-box">
             <Search size={17} />
@@ -1142,52 +1091,57 @@ export default function Home() {
             }}
           >
             {visibleGuests.map((g) => (
-              <button
-                key={g.id}
-                className={`guest-row ${!g.tableId ? 'unassigned-row' : ''}`}
-                onPointerDown={(e) => {
-                  if (!mobilePanel && e.pointerType !== 'touch')
-                    startPointer(e, g.id);
-                }}
-                draggable={false}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/plain', g.id);
-                  e.dataTransfer.effectAllowed = 'move';
-                  setDragging(g.id);
-                }}
-                onDragEnd={() => {
-                  setDragging(null);
-                  setDropTarget(null);
-                }}
-                onClick={() => handleGuestClick(g)}
-              >
-                <span
-                  className="drag-handle"
-                  aria-hidden="true"
+              <div key={g.id} className="guest-row-wrap">
+                <button
+                  className={`guest-row ${!g.tableId ? 'unassigned-row' : ''}`}
                   onPointerDown={(e) => {
-                    e.stopPropagation();
-                    startPointer(e, g.id);
+                    if (!mobilePanel && e.pointerType !== 'touch')
+                      startPointer(e, g.id);
                   }}
+                  draggable={false}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', g.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDragging(g.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setDropTarget(null);
+                  }}
+                  onClick={() => handleGuestClick(g)}
                 >
-                  <GripVertical size={14} />
-                </span>
-                <span className={`avatar tone-${toneIndex(g.id)}`}>
-                  {initials(g.name)}
-                </span>
-                <span className="guest-info">
-                  <strong>{g.name}</strong>
-                  <span>
-                    {tableName(g.tableId)} · {mealLabel(g.meal)}
-                    {g.tableId && (
-                      <>
-                        <i />
-                        Lugar {(g.seat ?? 0) + 1}
-                      </>
-                    )}
+                  <span
+                    className="drag-handle"
+                    aria-hidden="true"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      startPointer(e, g.id);
+                    }}
+                  >
+                    <GripVertical size={14} />
                   </span>
-                </span>
-                <ChevronRight size={15} className="row-arrow" />
-              </button>
+                  <span className={`avatar tone-${toneIndex(g.id)}`}>
+                    {initials(g.name)}
+                  </span>
+                  <span className="guest-info">
+                    <strong>{g.name}</strong>
+                    <span>
+                      {tableName(g.tableId)}
+                      {g.tableId && (
+                        <>
+                          <i />
+                          Lugar {(g.seat ?? 0) + 1}
+                        </>
+                      )}
+                    </span>
+                  </span>
+                </button>
+                <MealPicker
+                  value={g.meal}
+                  personName={g.name}
+                  onChange={(meal) => setMeal(g.id, meal)}
+                />
+              </div>
             ))}
             {!visibleGuests.length && (
               <div className="empty-list">
@@ -1283,21 +1237,36 @@ export default function Home() {
               </span>
               <span className="move-banner-copy">
                 <small>ASIENTO SELECCIONADO</small>
-                <strong>{movingGuest.name}</strong>
-                <span>
-                  Toca una silla vacía para mover o una ocupada para intercambiar.
+                <span className="move-banner-name">
+                  <strong>{movingGuest.name}</strong>
+                  <MealPicker
+                    tag
+                    value={movingGuest.meal}
+                    personName={movingGuest.name}
+                    onChange={(meal) => setMeal(movingGuest.id, meal)}
+                  />
+                </span>
+                <span className="move-banner-hint">
+                  Toca una silla vacía para mover o una ocupada para
+                  intercambiar.
                 </span>
               </span>
-              <button
-                className="move-banner-unseat"
-                onClick={() => {
-                  if (movingGuest?.tableId) removeFromTable(movingGuest.id);
-                  cancelMove();
-                }}
-              >
-                <UserRoundMinus size={15} />
-                <span>Sin mesa</span>
-              </button>
+              <span className="move-banner-actions">
+                <button
+                  className="move-banner-edit"
+                  aria-label={`Editar a ${movingGuest.name}`}
+                  title="Editar nombre, menú o mesa"
+                  onClick={() => {
+                    // The editor can reassign the table, so the pending move ends
+                    // here rather than leaving two ways to seat the same person.
+                    const person = movingGuest;
+                    cancelMove();
+                    openGuest(person);
+                  }}
+                >
+                  <Pencil size={15} />
+                </button>
+              </span>
               <button onClick={cancelMove} aria-label="Cancelar movimiento">
                 <X size={18} />
               </button>
@@ -1463,7 +1432,9 @@ export default function Home() {
                         ? 'Pareja'
                         : table.name.replace('Mesa ', '')}
                     </strong>
-                    <small>{full ? 'llena' : `${free} libre${free === 1 ? '' : 's'}`}</small>
+                    <small>
+                      {full ? 'llena' : `${free} libre${free === 1 ? '' : 's'}`}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -1651,11 +1622,21 @@ export default function Home() {
                 onChange={(e) => setAddPersonName(e.target.value)}
               />
             </div>
-            <label className="field-label" htmlFor="new-person-meal">Menú</label>
-            <select id="new-person-meal" className="meal-select" value={addPersonMeal}
-              onChange={(e) => setAddPersonMeal(e.target.value as Meal | 'pending')}>
+            <label className="field-label" htmlFor="new-person-meal">
+              Menú
+            </label>
+            <select
+              id="new-person-meal"
+              className="meal-select"
+              value={addPersonMeal}
+              onChange={(e) =>
+                setAddPersonMeal(e.target.value as Meal | 'pending')
+              }
+            >
               {Object.entries(mealLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+                <option key={value} value={value}>
+                  {label}
+                </option>
               ))}
             </select>
             <span className="field-label" id="new-person-table-label">
@@ -1752,11 +1733,19 @@ export default function Home() {
                 onChange={(e) => setEditName(e.target.value)}
               />
             </div>
-            <label className="field-label" htmlFor="guest-meal">Menú</label>
-            <select id="guest-meal" className="meal-select" value={editMeal}
-              onChange={(e) => setEditMeal(e.target.value as Meal | 'pending')}>
+            <label className="field-label" htmlFor="guest-meal">
+              Menú
+            </label>
+            <select
+              id="guest-meal"
+              className="meal-select"
+              value={editMeal}
+              onChange={(e) => setEditMeal(e.target.value as Meal | 'pending')}
+            >
               {Object.entries(mealLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+                <option key={value} value={value}>
+                  {label}
+                </option>
               ))}
             </select>
             <span className="field-label" id="table-label">
@@ -1850,26 +1839,6 @@ export default function Home() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <Dialog open={referenceOpen} onOpenChange={setReferenceOpen}>
-        <DialogContent className="reference-dialog" showCloseButton={false}>
-          <DialogClose className="dialog-close-button" aria-label="Cerrar">
-            <X size={18} />
-          </DialogClose>
-          <DialogTitle>Tu plano original</DialogTitle>
-          <DialogDescription>
-            La distribución está basada en esta foto. Los nombres transcritos
-            son editables; revisa su ortografía. Se incluyen 89 nombres y un
-            invitado pendiente por identificar.
-          </DialogDescription>
-          <img
-            src="/plano-original.jpg"
-            alt="Foto original del salón: bar y dos mesas arriba, cuatro mesas centrales, ponqué, mesa de pareja a la derecha y cuatro mesas abajo."
-          />
-          <p>
-            Plano orientativo: las proporciones no representan medidas reales.
-          </p>
-        </DialogContent>
-      </Dialog>
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="help-dialog" showCloseButton={false}>
           <DialogClose className="dialog-close-button" aria-label="Cerrar">
@@ -1910,10 +1879,9 @@ export default function Home() {
             </div>
           </div>
           <p className="local-note">
-            {account
-              ? 'Tu plano se guarda en tu cuenta de Google y se abre en tus dispositivos al entrar con la misma cuenta.'
-              : 'Los cambios se guardan solo en este navegador. Entra con Google para tener un plano propio en todos tus dispositivos.'}
-            {' '}Puedes deshacer los últimos cambios durante la sesión.
+            Tu plano se guarda en tu cuenta de Google y se abre en tus
+            dispositivos al entrar con la misma cuenta. Puedes deshacer los
+            últimos cambios durante la sesión.
           </p>
         </DialogContent>
       </Dialog>

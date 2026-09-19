@@ -41,10 +41,16 @@ export function watchAccount(
   return onAuthStateChanged(service.auth, next, (cause) => error(cause.message));
 }
 
-export async function signInWithGoogle() {
+export async function signInWithGoogle(loginHint?: string) {
   const service = services();
   if (!service) throw new Error('Google aún no está configurado.');
-  await signInWithPopup(service.auth, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  // A remembered profile goes straight to that account; otherwise Google asks
+  // which one to use instead of reusing whoever is already signed in there.
+  provider.setCustomParameters(
+    loginHint ? { login_hint: loginHint } : { prompt: 'select_account' },
+  );
+  await signInWithPopup(service.auth, provider);
 }
 
 export async function signOutOfGoogle() {
