@@ -1,4 +1,10 @@
-import { tables, type Guest, type Table } from './seating';
+import {
+  tables,
+  mealLabel,
+  mealSummary,
+  type Guest,
+  type Table,
+} from './seating';
 
 const WIDTH = 1040;
 const INK = '#48334f';
@@ -183,7 +189,7 @@ function wrapName(name: string): string[] {
 type Section = {
   title: string;
   subtitle: string;
-  people: { label: string; name: string }[];
+  people: { label: string; name: string; meal?: string }[];
 };
 export function createSeatingReport(
   guests: readonly Guest[],
@@ -194,6 +200,7 @@ export function createSeatingReport(
     dateStyle: 'medium',
     timeStyle: 'short',
   });
+  const menus = mealSummary(guests);
   const heading =
     text(40, 44, 'Recepción · Distribución de invitados', 28) +
     text(
@@ -203,11 +210,24 @@ export function createSeatingReport(
       16,
       MUTED,
     ) +
-    text(1000, 76, timestamp, 14, MUTED, 'end');
+    text(1000, 76, timestamp, 14, MUTED, 'end') +
+    text(
+      40,
+      102,
+      `${menus.chicken} pollo · ${menus.beef} carne · ${menus.vegetarian} vegetariano · ${menus.pending} por confirmar`,
+      14,
+      MUTED,
+    );
   const sections: Section[] = tables.map((table) => ({
     title: table.name,
     subtitle: `${guests.filter((guest) => guest.tableId === table.id).length} de ${table.capacity} lugares ocupados`,
     people: Array.from({ length: table.capacity }, (_, seat) => ({
+      meal: (() => {
+        const guest = guests.find(
+          (g) => g.tableId === table.id && g.seat === seat,
+        );
+        return guest ? mealLabel(guest.meal) : undefined;
+      })(),
       label: String(seat + 1).padStart(2, '0'),
       name:
         guests.find(
@@ -222,7 +242,11 @@ export function createSeatingReport(
       subtitle: `${unassigned.length} ${unassigned.length === 1 ? 'persona' : 'personas'} por ubicar`,
       people: unassigned
         .slice(index, index + 10)
-        .map((guest) => ({ label: '—', name: guest.name })),
+        .map((guest) => ({
+          label: '—',
+          name: guest.name,
+          meal: mealLabel(guest.meal),
+        })),
     });
   }
   const rows: { height: number; body: string }[] = [];
@@ -239,6 +263,10 @@ export function createSeatingReport(
         for (const line of lines) {
           content += text(50, y, line, 16);
           y += 22;
+        }
+        if (person.meal) {
+          content += text(50, y, person.meal, 13, MUTED);
+          y += 19;
         }
         y += 6;
       }

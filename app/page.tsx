@@ -68,13 +68,26 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
 import {
   initialGuests,
+  mealLabels,
+  mealLabel,
+  mealSummary,
+  type Meal,
   tables,
   moveGuest,
   validateGuests,
   type Guest,
   type Table,
 } from './seating';
-import { expandTable, fitRoom, revealAxis, roomGeometry } from './map-layout';
+import { fitRoom, roomGeometry } from './map-layout';
+import {
+  MAX_OPEN_TABLES,
+  closeTable,
+  openTable,
+  rowAction,
+  seatRows,
+  summarize,
+  tableStrip,
+} from './open-tables';
 import { downloadSeatingPng, printSeatingPdf } from './seating-export';
 import {
   captureGuestPointer,
@@ -82,9 +95,8 @@ import {
   watchGuestDrag,
   type GuestPointer,
 } from './guest-drag';
-// v2 stores edits on this device. A draft that still matches the previous
-// starter template is treated as stale and replaced with the current plan.
-const STORAGE_KEY = 'ensulugar-recepcion-v2';
+// Keep the previous draft under v2; this PDF revision starts a fresh saved plan.
+const STORAGE_KEY = 'ensulugar-recepcion-v3-pdf-20260919';
 const initials = (name: string) =>
   name
     .split(' ')
@@ -125,14 +137,11 @@ const sameRoster = (left: readonly Guest[], right: readonly Guest[]) => {
     return (
       baseline?.name === guest.name &&
       baseline.tableId === guest.tableId &&
-      baseline.seat === guest.seat
+      baseline.seat === guest.seat &&
+      (baseline.meal ?? null) === (guest.meal ?? null)
     );
   });
 };
-const previousTemplate = initialGuests.map((guest) => ({
-  ...guest,
-  name: guest.id === 'g5' ? 'Efraín' : guest.id === 'g8' ? 'Mabel' : guest.name,
-}));
 export default function Home() {
   const [guests, setGuests] = useState<Guest[]>(initialGuests),
     [history, setHistory] = useState<Guest[][]>([]);
@@ -141,7 +150,8 @@ export default function Home() {
     [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [selectedGuest, setSelectedGuest] = useState<string | null>(null),
     [editName, setEditName] = useState(''),
-    [editTable, setEditTable] = useState('none');
+    [editTable, setEditTable] = useState('none'),
+    [editMeal, setEditMeal] = useState<Meal | 'pending'>('pending');
   const [referenceOpen, setReferenceOpen] = useState(false),
     [helpOpen, setHelpOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -151,12 +161,14 @@ export default function Home() {
   const [dragging, setDragging] = useState<string | null>(null),
     [dropTarget, setDropTarget] = useState<string | null>(null),
     [dropSeat, setDropSeat] = useState<number | null>(null);
-  const [focusedTableId, setFocusedTableId] = useState<string | null>(null),
-    [focusedGuestId, setFocusedGuestId] = useState<string | null>(null),
+  const [pressedSeatId, setPressedSeatId] = useState<string | null>(null);
+  const [openTables, setOpenTables] = useState<string[]>([]),
+    [compareOpen, setCompareOpen] = useState(false),
     [movingGuestId, setMovingGuestId] = useState<string | null>(null),
-    [tableDetailsOpen, setTableDetailsOpen] = useState(false);
+    [sheetTall, setSheetTall] = useState(false);
   const [addPersonOpen, setAddPersonOpen] = useState(false),
     [addPersonName, setAddPersonName] = useState(''),
+    [addPersonMeal, setAddPersonMeal] = useState<Meal | 'pending'>('pending'),
     [addPersonTable, setAddPersonTable] = useState('none'),
     [addPersonSeat, setAddPersonSeat] = useState<number | null>(null),
     [addFromTableId, setAddFromTableId] = useState<string | null>(null),
@@ -213,24 +225,17 @@ export default function Home() {
     guestCount = guests.length,
     unassigned = guestCount - seated,
     selected = tables.find((t) => t.id === selectedTable),
-    focusedTable = tables.find((t) => t.id === focusedTableId),
     movingGuest = guests.find((g) => g.id === movingGuestId),
-    focusedOccupants = focusedTable
-      ? guests.filter((g) => g.tableId === focusedTable.id)
-      : [],
     pendingDelete = guests.find((g) => g.id === pendingDeleteId);
   const hasRosterChanges = !sameRoster(guests, initialGuests);
-  const expandedTable = dragging ? undefined : focusedTable;
-  const expandedLayout = expandedTable
-    ? expandTable(expandedTable, guests, viewport)
-    : undefined;
+  const boardTables = openTables
+    .map((id) => tables.find((t) => t.id === id))
+    .filter((table): table is Table => !!table);
+  const strip = tableStrip(guests);
+  const menus = mealSummary(guests);
   const fit = fitRoom(viewport);
   const scale = fit * zoom;
-  const geometry = roomGeometry(viewport, scale, expandedTable, expandedLayout);
-  const focusLeft = geometry.focus?.left,
-    focusTop = geometry.focus?.top;
-  const focusWidth = geometry.focus?.width,
-    focusHeight = geometry.focus?.height;
+  const geometry = roomGeometry(viewport, scale);
   const visibleGuests = guests.filter(
     (g) =>
       normalize(g.name).includes(normalize(query)) &&
@@ -238,12 +243,11 @@ export default function Home() {
       (!selectedTable || g.tableId === selectedTable),
   );
   const cancelMove = useCallback(() => {
+    setPressedSeatId(null);
     setMovingGuestId(null);
     setDragging(null);
     setDropTarget(null);
     setDropSeat(null);
-    setFocusedTableId(null);
-    setFocusedGuestId(null);
   }, []);
   const commit = useCallback(
     (next: Guest[]) => {
@@ -257,11 +261,11 @@ export default function Home() {
       const result = moveGuest(guests, id, target, seat);
       if (result.error) {
         setToast(result.error);
-        // A full table needs an explicit seat choice, directly on the same map.
+        // A full table needs an explicit seat choice: open it beside the origin
+        // so the person can be swapped with someone already sitting there.
         if (target && seat === undefined) {
           setMovingGuestId(id);
-          setFocusedTableId(target);
-          setFocusedGuestId(null);
+          setOpenTables((open) => openTable(open, target, open.length > 0));
         }
         return false;
       }
@@ -285,7 +289,7 @@ export default function Home() {
       const draft = localStorage.getItem(STORAGE_KEY);
       if (draft) {
         const parsed = JSON.parse(draft);
-        if (validateGuests(parsed) && !sameRoster(parsed, previousTemplate)) {
+        if (validateGuests(parsed)) {
           setGuests(parsed);
         }
       }
@@ -308,8 +312,7 @@ export default function Home() {
     setHistory([]);
     setSelectedTable(null);
     setSelectedGuest(null);
-    setFocusedTableId(null);
-    setFocusedGuestId(null);
+    setOpenTables([]);
     setMovingGuestId(null);
     setDragging(null);
     setDropTarget(null);
@@ -337,7 +340,8 @@ export default function Home() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     const previous = previousView.current;
-    // Preserve the camera's map coordinate while its scale or padding changes.
+    // Preserve the camera's map coordinate while the plan resizes around the
+    // open tables, so opening a panel never shifts the room under the user.
     const centerX = previous
       ? (previous.scrollLeft + previous.width / 2 - previous.left) /
         previous.scale
@@ -346,31 +350,8 @@ export default function Home() {
       ? (previous.scrollTop + previous.height / 2 - previous.top) /
         previous.scale
       : 380;
-    let left = geometry.left + centerX * scale - viewport.width / 2;
-    let top = geometry.top + centerY * scale - viewport.height / 2;
-    if (
-      focusLeft !== undefined &&
-      focusTop !== undefined &&
-      focusWidth !== undefined &&
-      focusHeight !== undefined
-    ) {
-      left = revealAxis(
-        left,
-        focusLeft,
-        focusWidth,
-        viewport.width,
-        geometry.width,
-      );
-      top = revealAxis(
-        top,
-        focusTop,
-        focusHeight,
-        viewport.height,
-        geometry.height,
-      );
-    }
-    scroller.scrollLeft = left;
-    scroller.scrollTop = top;
+    scroller.scrollLeft = geometry.left + centerX * scale - viewport.width / 2;
+    scroller.scrollTop = geometry.top + centerY * scale - viewport.height / 2;
     previousView.current = {
       left: geometry.left,
       top: geometry.top,
@@ -385,10 +366,6 @@ export default function Home() {
     geometry.height,
     geometry.left,
     geometry.top,
-    focusLeft,
-    focusTop,
-    focusWidth,
-    focusHeight,
     scale,
     viewport.width,
     viewport.height,
@@ -401,9 +378,6 @@ export default function Home() {
         suppressClick,
         start(id) {
           setMovingGuestId(id);
-          setFocusedTableId(null);
-          setFocusedGuestId(null);
-          setTableDetailsOpen(false);
           setMobilePanel(false);
           setDragging(id);
         },
@@ -431,7 +405,6 @@ export default function Home() {
       if (
         e.key === 'Escape' &&
         !e.defaultPrevented &&
-        !tableDetailsOpen &&
         !addPersonOpen &&
         !pendingDeleteId &&
         !selectedGuest &&
@@ -451,7 +424,6 @@ export default function Home() {
     pendingDeleteId,
     referenceOpen,
     selectedGuest,
-    tableDetailsOpen,
   ]);
   function undo() {
     if (!history.length) return;
@@ -465,25 +437,32 @@ export default function Home() {
     setSelectedGuest(g.id);
     setEditName(g.name);
     setEditTable(g.tableId ?? 'none');
+    setEditMeal(g.meal ?? 'pending');
   }
-  function focusTable(id: string, guestId: string | null = null) {
-    setFocusedTableId(id);
-    setFocusedGuestId(guestId);
-    setSelectedTable(id);
-    setFilter('all');
-    setQuery('');
-    setMovingGuestId(null);
+  // Opening a table never moves the plan: it adds a panel beside it.
+  function showTable(id: string, compare = false) {
+    setOpenTables((open) => openTable(open, id, compare));
+    setSheetTall(false);
     setMobilePanel(false);
   }
-  function beginMove(id: string) {
+  function hideTable(id: string) {
+    setOpenTables((open) => closeTable(open, id));
+  }
+  function beginMove(id: string, revealTable = true) {
     const guest = guests.find((g) => g.id === id);
     if (!guest) return;
     setMovingGuestId(id);
-    setFocusedTableId(null);
-    setFocusedGuestId(null);
-    setTableDetailsOpen(false);
     setMobilePanel(false);
-    setToast(`Elige una mesa o un lugar para ${guest.name}`);
+    if (revealTable && guest.tableId) setOpenTables((open) => openTable(open, guest.tableId!));
+    setToast('');
+  }
+  // Tapping a seat row picks someone up, seats them, or swaps two people.
+  function tapSeat(tableId: string, seat: number, guest?: Guest, revealTable = true) {
+    const action = rowAction(movingGuestId, { guest: guest ?? null });
+    if (action === 'unpick') return cancelMove();
+    if (action === 'pick') return beginMove(guest!.id, revealTable);
+    if (action === 'add') return openAddPerson(tableId, seat);
+    assign(movingGuestId!, tableId, seat);
   }
   function toggleMapOnly() {
     if (mapOnly) {
@@ -499,7 +478,7 @@ export default function Home() {
   function handleGuestClick(g: Guest) {
     if (movingGuestId && g.tableId) {
       assign(movingGuestId, g.tableId, g.seat ?? undefined);
-    } else if (g.tableId) focusTable(g.tableId, g.id);
+    } else if (g.tableId) showTable(g.tableId);
     else openGuest(g);
   }
   function openAddPerson(
@@ -522,17 +501,17 @@ export default function Home() {
       table && occupied < table.capacity && seatIsFree,
     );
     setAddPersonName('');
+    setAddPersonMeal('pending');
     setAddPersonTable(canAssignToTable && table ? table.id : 'none');
     setAddPersonSeat(canAssignToTable ? seat : null);
     setAddFromTableId(tableId);
-    setTableDetailsOpen(false);
     setAddPersonOpen(true);
   }
   function addPerson() {
     const name = addPersonName.trim();
     if (!name) return;
     const id = createGuestId(guests);
-    const draft: Guest[] = [...guests, { id, name, tableId: null, seat: null }];
+    const draft: Guest[] = [...guests, { id, name, tableId: null, seat: null, meal: addPersonMeal === 'pending' ? null : addPersonMeal }];
     let next = draft;
     if (addPersonTable !== 'none') {
       const result = moveGuest(
@@ -555,7 +534,7 @@ export default function Home() {
     setAddPersonTable('none');
     setAddPersonSeat(null);
     setAddFromTableId(null);
-    if (returnToTable) setTableDetailsOpen(true);
+    if (returnToTable) showTable(returnToTable);
     setToast(
       placedAt
         ? `${name} agregado · ${tableName(placedAt)}`
@@ -572,11 +551,10 @@ export default function Home() {
           : candidate,
       ),
     );
-    setFocusedGuestId(null);
+    if (movingGuestId === id) setMovingGuestId(null);
     setToast(`${guest.name} quedó sin mesa`);
   }
   function requestDelete(id: string) {
-    setTableDetailsOpen(false);
     setSelectedGuest(null);
     setPendingDeleteId(id);
   }
@@ -588,7 +566,7 @@ export default function Home() {
     }
     commit(guests.filter((candidate) => candidate.id !== guest.id));
     setPendingDeleteId(null);
-    setFocusedGuestId(null);
+    if (movingGuestId === guest.id) setMovingGuestId(null);
     setToast(`${guest.name} eliminado del evento`);
   }
   function saveGuest() {
@@ -604,7 +582,7 @@ export default function Home() {
     }
     commit(
       r.guests.map((g) =>
-        g.id === active.id ? { ...g, name: editName.trim() } : g,
+        g.id === active.id ? { ...g, name: editName.trim(), meal: editMeal === 'pending' ? null : editMeal } : g,
       ),
     );
     setSelectedGuest(null);
@@ -623,31 +601,22 @@ export default function Home() {
     setDropTarget(null);
   }
   function renderTable(table: Table) {
-    const expanded = expandedTable?.id === table.id;
-    const layout = expanded ? expandedLayout : undefined;
     const occupants = guests.filter((g) => g.tableId === table.id),
+      isOpen = openTables.includes(table.id),
       highlighted = occupants.some(
         (g) => query && normalize(g.name).includes(normalize(query)),
       );
+    const free = table.capacity - occupants.length;
+    const openThis = () => {
+      if (movingGuestId) assign(movingGuestId, table.id);
+      else showTable(table.id, openTables.length === 1 && !isOpen);
+    };
     return (
       <div
         key={table.id}
         data-table-id={table.id}
-        inert={!!expandedTable && !expanded}
-        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${selectedTable === table.id ? 'is-selected' : ''} ${expanded ? 'is-expanded' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''}`}
-        style={
-          {
-            left: table.x,
-            top: table.y,
-            ...(layout
-              ? {
-                  width: layout.width,
-                  height: layout.height,
-                  '--name-scale': 1 / scale,
-                }
-              : {}),
-          } as React.CSSProperties
-        }
+        className={`table-group ${table.horizontal ? 'horizontal' : ''} ${table.id === 'couple' ? 'couple-group' : ''} ${isOpen || selectedTable === table.id ? 'is-selected' : ''} ${highlighted ? 'is-found' : ''} ${dropTarget === table.id ? 'is-dropping' : ''} ${occupants.length === 0 ? 'is-empty' : ''} ${movingGuestId && free > 0 ? 'has-room' : ''} ${movingGuestId && free === 0 ? 'is-full' : ''}`}
+        style={{ left: table.x, top: table.y }}
         onDragOver={(e) => {
           e.preventDefault();
           setDropTarget(table.id);
@@ -658,56 +627,17 @@ export default function Home() {
         }}
         onDrop={(e) => handleDrop(e, table.id)}
       >
-        {layout && (
-          <svg
-            className="seat-connectors"
-            width={layout.width}
-            height={layout.height}
-            aria-hidden="true"
-          >
-            {layout.seats.map((seat, index) => (
-              <line
-                key={index}
-                x1={Math.max(
-                  layout.surface.left,
-                  Math.min(
-                    seat.left + seat.width / 2,
-                    layout.surface.left + layout.surface.width,
-                  ),
-                )}
-                y1={Math.max(
-                  layout.surface.top,
-                  Math.min(
-                    seat.top + seat.height / 2,
-                    layout.surface.top + layout.surface.height,
-                  ),
-                )}
-                x2={seat.left + seat.width / 2}
-                y2={seat.top + seat.height / 2}
-              />
-            ))}
-          </svg>
-        )}
         <button
           className="table-touch-target"
           tabIndex={-1}
           aria-hidden="true"
-          aria-label={`Seleccionar ${table.name}`}
-          onClick={() => {
-            if (movingGuestId) assign(movingGuestId, table.id);
-            else focusTable(table.id);
-          }}
+          onClick={openThis}
         />
         <button
           className="table-surface"
-          style={layout?.surface}
-          aria-expanded={expanded}
-          aria-label={`${table.name}, ${occupants.length} de ${table.capacity} lugares. ${expanded ? 'Editar lugares' : 'Ver invitados'}`}
-          onClick={() => {
-            if (movingGuestId) assign(movingGuestId, table.id);
-            else if (expanded) setTableDetailsOpen(true);
-            else focusTable(table.id);
-          }}
+          aria-pressed={isOpen}
+          aria-label={`${table.name}, ${occupants.length} de ${table.capacity} lugares. ${movingGuestId ? 'Mover aquí' : 'Abrir la mesa'}`}
+          onClick={openThis}
         >
           {table.id === 'couple' ? (
             <Heart size={20} />
@@ -720,10 +650,6 @@ export default function Home() {
             {occupants.length}
             <span> / {table.capacity}</span>
           </span>
-          {!expanded && table.id !== 'couple' && occupants.length === 0 && (
-            <Plus size={14} />
-          )}
-          {expanded && <Pencil size={14} className="table-edit-hint" />}
         </button>
         {Array.from({ length: table.capacity }, (_, seat) => {
           const guest = occupants.find((g) => g.seat === seat),
@@ -741,27 +667,27 @@ export default function Home() {
           return (
             <button
               key={seat}
+              type="button"
+              aria-label={`${guest?.name ?? 'Disponible'} · ${table.name} · Lugar ${seat + 1}`}
+              aria-pressed={Boolean(guest && movingGuestId === guest.id)}
+              onPointerDown={(event) => {
+                if (guest && event.isPrimary && event.button === 0) {
+                  setPressedSeatId(guest.id);
+                  startPointer(event, guest.id);
+                }
+              }}
+              onPointerUp={() => setPressedSeatId(null)}
+              onPointerCancel={() => setPressedSeatId(null)}
+              onLostPointerCapture={() => setPressedSeatId(null)}
+              onClick={() => tapSeat(table.id, seat, guest, false)}
               data-table-id={table.id}
               data-seat-index={seat}
               data-guest-id={guest?.id}
-              onPointerDown={(e) => {
-                if (
-                  guest &&
-                  (!movingGuestId || movingGuestId === guest.id) &&
-                  (expanded || e.pointerType === 'mouse')
-                )
-                  startPointer(e, guest.id);
-              }}
-              onContextMenu={(e) => {
-                if (expanded && guest) e.preventDefault();
-              }}
-              className={`seat ${side} ${guest ? 'occupied' : 'vacant'} ${guest && query && normalize(guest.name).includes(normalize(query)) ? 'search-match' : ''} ${dragging === guest?.id ? 'is-dragging' : ''} ${movingGuestId === guest?.id ? 'move-origin' : ''} ${expanded && guest?.id === focusedGuestId ? 'is-current' : ''} ${dropTarget === table.id && dropSeat === seat ? 'is-drop-seat' : ''}`}
+              data-pressing={Boolean(guest && pressedSeatId === guest.id)}
+              className={`seat ${side} ${guest ? 'occupied' : 'vacant'} ${guest && query && normalize(guest.name).includes(normalize(query)) ? 'search-match' : ''} ${movingGuestId === guest?.id ? 'move-origin' : ''} ${dropTarget === table.id && dropSeat === seat ? 'is-drop-seat' : ''}`}
               style={
                 {
                   '--seat-index': table.id === 'couple' ? seat : index,
-                  ...(layout
-                    ? { ...layout.seats[seat], right: 'auto', bottom: 'auto' }
-                    : {}),
                 } as React.CSSProperties
               }
               title={
@@ -769,49 +695,148 @@ export default function Home() {
                   ? `${guest.name} · ${table.name} · Lugar ${seat + 1}`
                   : `${table.name} · Lugar ${seat + 1} disponible`
               }
-              aria-label={
-                guest
-                  ? `${guest.name}, ${table.name}, lugar ${seat + 1}. ${expanded ? 'Arrastrar o tocar para mover' : 'Ver nombres de la mesa'}`
-                  : `${table.name}, lugar ${seat + 1} disponible`
-              }
-              draggable={false}
-              onDragStart={(e) => {
-                if (!guest) return;
-                e.dataTransfer.setData('text/plain', guest.id);
-                e.dataTransfer.effectAllowed = 'move';
-                setDragging(guest.id);
-              }}
-              onDragEnd={() => {
-                setDragging(null);
-                setDropTarget(null);
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => handleDrop(e, table.id, seat)}
-              onClick={() => {
-                if (movingGuestId) assign(movingGuestId, table.id, seat);
-                else if (expanded && guest) beginMove(guest.id);
-                else if (expanded) openAddPerson(table.id, seat);
-                else focusTable(table.id, guest?.id ?? null);
-              }}
             >
-              {expanded ? (
-                <span className="seat-name">{guest?.name ?? 'Disponible'}</span>
-              ) : guest ? (
-                initials(guest.name)
-              ) : (
-                <Plus size={12} />
+              {guest ? initials(guest.name) : ''}
+              {guest && (movingGuestId === guest.id || pressedSeatId === guest.id) && (
+                <span className="seat-selection-mark" aria-hidden="true">
+                  <CheckCircle2 size={13} />
+                </span>
               )}
             </button>
           );
         })}
-        {table.id === 'couple' && !expanded && (
-          <span className="couple-label">Pareja</span>
+        {table.id === 'couple' && <span className="couple-label">Pareja</span>}
+      </div>
+    );
+  }
+  function renderSeatRow(table: Table, seat: number, guest: Guest | null) {
+    const picked = movingGuestId === guest?.id;
+    const action = rowAction(movingGuestId, { guest });
+    const hint = picked
+      ? 'Elige su nuevo lugar'
+      : action === 'swap'
+        ? 'Tocar para intercambiar'
+        : action === 'place'
+          ? `Sentar aquí a ${movingGuest?.name}`
+          : guest
+            ? `Lugar ${seat + 1}`
+            : 'Lugar disponible';
+    return (
+      <div
+        key={seat}
+        data-table-id={table.id}
+        data-seat-index={seat}
+        data-guest-id={guest?.id}
+        className={`seat-row ${guest ? '' : 'is-free'} ${picked ? 'is-picked' : ''} ${!picked && action === 'place' ? 'is-target' : ''} ${!picked && action === 'swap' ? 'is-swappable' : ''} ${guest && query && normalize(guest.name).includes(normalize(query)) ? 'is-found' : ''} ${dropTarget === table.id && dropSeat === seat ? 'is-drop-seat' : ''}`}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => handleDrop(e, table.id, seat)}
+      >
+        <span className="sr-num">{String(seat + 1).padStart(2, '0')}</span>
+        <button
+          className="sr-main"
+          onClick={() => tapSeat(table.id, seat, guest ?? undefined)}
+          aria-label={
+            guest
+              ? `${guest.name}, ${table.name}, lugar ${seat + 1}. ${hint}`
+              : `${table.name}, lugar ${seat + 1} disponible. ${hint}`
+          }
+        >
+          {guest ? (
+            <span className={`avatar tone-${toneIndex(guest.id)}`}>
+              {initials(guest.name)}
+            </span>
+          ) : (
+            <span className="sr-plus">
+              <Plus size={15} />
+            </span>
+          )}
+          <span className="sr-body">
+            <strong>{guest?.name ?? 'Lugar libre'}</strong>
+            <small>{guest ? `${mealLabel(guest.meal)} · ${hint}` : hint}</small>
+          </span>
+        </button>
+        {guest && !picked && (
+          <button
+            className="sr-edit"
+            aria-label={`Editar a ${guest.name}`}
+            title="Editar o eliminar"
+            onClick={() => openGuest(guest)}
+          >
+            <Pencil size={15} />
+          </button>
+        )}
+        {guest && (
+          <span
+            className="sr-grip"
+            aria-hidden="true"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              startPointer(e, guest.id);
+            }}
+          >
+            <GripVertical size={15} />
+          </span>
         )}
       </div>
     );
   }
+  function renderTablePanel(table: Table) {
+    const { occupied, free } = summarize(guests, table);
+    const canCompare = openTables.length < MAX_OPEN_TABLES;
+    return (
+      <article className="table-panel" key={table.id} data-table-id={table.id}>
+        <header className="tp-head">
+          <span className="tp-titles">
+            <strong>{table.name}</strong>
+            <small>
+              {occupied} de {table.capacity}
+              {free > 0
+                ? ` · ${free} ${free === 1 ? 'lugar libre' : 'lugares libres'}`
+                : ' · completa'}
+            </small>
+          </span>
+          <span className="tp-actions">
+            {canCompare && (
+              <button
+                className="button tp-compare"
+                onClick={() => setCompareOpen(true)}
+              >
+                <ArrowLeftRight size={14} />
+                <span>Comparar</span>
+              </button>
+            )}
+            <button
+              className="icon-button"
+              aria-label={`Cerrar ${table.name}`}
+              onClick={() => hideTable(table.id)}
+            >
+              <X size={18} />
+            </button>
+          </span>
+        </header>
+        <div className="tp-rows">
+          {seatRows(guests, table).map((row) =>
+            renderSeatRow(table, row.seat, row.guest),
+          )}
+        </div>
+        <footer className="tp-foot">
+          <button
+            className="button text-button"
+            onClick={() => openAddPerson(table.id)}
+          >
+            <Plus size={15} />
+            Agregar persona a esta mesa
+          </button>
+        </footer>
+      </article>
+    );
+  }
   return (
-    <main className={`app-shell ${mapOnly ? 'map-only' : ''}`}>
+    <main
+      className={`app-shell ${mapOnly ? 'map-only' : ''} ${
+        boardTables.length ? 'has-board' : ''
+      } ${boardTables.length > 1 ? 'has-two' : ''}`}
+    >
       <header className="app-header">
         <Link className="brand" href="/" aria-label="Recepción, inicio">
           <span className="brand-icon">
@@ -963,7 +988,11 @@ export default function Home() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <div className="workspace">
+      <div
+        className={`workspace ${boardTables.length ? 'with-board' : ''} ${
+          boardTables.length > 1 ? 'with-two' : ''
+        }`}
+      >
         <aside
           className={`guest-panel ${mobilePanel ? 'mobile-open' : ''} ${selected && selected.name.length > 12 ? 'has-long-table-title' : ''}`}
         >
@@ -1003,6 +1032,9 @@ export default function Home() {
             {selected
               ? `${selected.capacity - guests.filter((g) => g.tableId === selected.id).length} lugares disponibles en esta mesa`
               : 'Buena compañía, bien ubicada.'}
+          </p>
+          <p className="menu-summary" aria-label="Resumen de menús">
+            {menus.chicken} pollo · {menus.beef} carne · {menus.vegetarian} vegetariano · {menus.pending} por confirmar
           </p>
           <label className="search-box">
             <Search size={17} />
@@ -1095,7 +1127,7 @@ export default function Home() {
                 <span className="guest-info">
                   <strong>{g.name}</strong>
                   <span>
-                    {tableName(g.tableId)}
+                    {tableName(g.tableId)} · {mealLabel(g.meal)}
                     {g.tableId && (
                       <>
                         <i />
@@ -1147,31 +1179,16 @@ export default function Home() {
           </div>
           <div className="panel-foot">
             <CircleHelp size={14} />
-            <span>Abre una mesa para mover o editar personas.</span>
+            <span>Toca una mesa del plano para abrir sus lugares.</span>
           </div>
         </aside>
-        <section
-          className={`plan-panel ${expandedTable ? 'has-expanded-table' : ''}`}
-          aria-label="Plano interactivo del salón"
-        >
+        <section className="plan-panel" aria-label="Plano del salón">
           <div className="plan-toolbar">
             <div className="plan-title">
               <LayoutGrid size={18} />
-              <h2>{expandedTable?.name ?? 'Plano del salón'}</h2>
+              <h2>Plano del salón</h2>
             </div>
             <div className="plan-actions">
-              {expandedTable && (
-                <button
-                  className="icon-button focus-dismiss"
-                  aria-label="Cerrar nombres de la mesa"
-                  onClick={() => {
-                    setFocusedTableId(null);
-                    setFocusedGuestId(null);
-                  }}
-                >
-                  <X size={19} />
-                </button>
-              )}
               <button
                 className="button text-button undo-button"
                 disabled={!history.length}
@@ -1215,14 +1232,22 @@ export default function Home() {
                 {initials(movingGuest.name)}
               </span>
               <span className="move-banner-copy">
-                <small>MOVIENDO A</small>
+                <small>ASIENTO SELECCIONADO</small>
                 <strong>{movingGuest.name}</strong>
                 <span>
-                  {expandedTable
-                    ? 'Toca un nombre para intercambiar sus lugares.'
-                    : 'Toca otra mesa o un asiento para ubicarlo.'}
+                  Toca una silla vacía para mover o una ocupada para intercambiar.
                 </span>
               </span>
+              <button
+                className="move-banner-unseat"
+                onClick={() => {
+                  if (movingGuest?.tableId) removeFromTable(movingGuest.id);
+                  cancelMove();
+                }}
+              >
+                <UserRoundMinus size={15} />
+                <span>Sin mesa</span>
+              </button>
               <button onClick={cancelMove} aria-label="Cancelar movimiento">
                 <X size={18} />
               </button>
@@ -1255,7 +1280,7 @@ export default function Home() {
                 style={{ width: geometry.width, height: geometry.height }}
               >
                 <div
-                  className={`floor-map ${expandedTable ? 'has-table-focus' : ''}`}
+                  className="floor-map"
                   style={{
                     left: geometry.left,
                     top: geometry.top,
@@ -1301,52 +1326,26 @@ export default function Home() {
                     <CakeSlice size={21} />
                     <span>PONQUÉ</span>
                   </div>
-                  {expandedTable && (
-                    <button
-                      className="map-focus-dimmer"
-                      aria-label="Cerrar nombres de la mesa"
-                      style={{
-                        left: -geometry.left / scale,
-                        top: -geometry.top / scale,
-                        width: geometry.width / scale,
-                        height: geometry.height / scale,
-                      }}
-                      onClick={() => {
-                        setFocusedTableId(null);
-                        setFocusedGuestId(null);
-                      }}
-                    />
-                  )}
                   {tables.map(renderTable)}
                 </div>
               </div>
             </div>
           </div>
           <div className="canvas-bottom">
-            {expandedTable ? (
-              <button
-                className="button edit-people-button"
-                onClick={() => setTableDetailsOpen(true)}
-              >
-                <Pencil size={15} />
-                Editar personas
-              </button>
-            ) : (
-              <div className="legend">
-                <span>
-                  <i className="legend-seat assigned" />
-                  Ocupado
-                </span>
-                <span>
-                  <i className="legend-seat" />
-                  Disponible
-                </span>
-                <span className="column-legend">
-                  <i className="legend-column" />
-                  Columna fija
-                </span>
-              </div>
-            )}
+            <div className="legend">
+              <span>
+                <i className="legend-seat assigned" />
+                Ocupado
+              </span>
+              <span>
+                <i className="legend-seat" />
+                Disponible
+              </span>
+              <span className="column-legend">
+                <i className="legend-column" />
+                Columna fija
+              </span>
+            </div>
             <div className="zoom-control">
               <button
                 aria-label="Alejar plano"
@@ -1372,6 +1371,129 @@ export default function Home() {
               </button>
             </div>
           </div>
+        </section>
+        <section
+          className={`table-board ${boardTables.length ? 'has-tables' : ''} ${sheetTall ? 'is-tall' : ''}`}
+          aria-label="Mesas abiertas"
+        >
+          <button
+            className="sheet-grab"
+            aria-label={sheetTall ? 'Encoger el panel' : 'Agrandar el panel'}
+            aria-expanded={sheetTall}
+            onClick={() => setSheetTall((tall) => !tall)}
+          >
+            <span />
+          </button>
+          {boardTables.length ? (
+            <>
+              <div className="mesa-sheet-actions">
+                <strong>Mesas abiertas</strong>
+                <button
+                  className="button text-button"
+                  onClick={() => setMobilePanel(true)}
+                >
+                  <Users size={15} />
+                  Invitados
+                </button>
+              </div>
+              <div className="mesa-tabs" aria-label="Cambiar de mesa">
+                {strip.map(({ table, occupied, free, full }) => (
+                  <button
+                    key={table.id}
+                    data-table-id={table.id}
+                    className={`mesa-tab ${openTables.includes(table.id) ? 'is-open' : ''} ${full ? 'is-full' : ''}`}
+                    aria-pressed={openTables.includes(table.id)}
+                    aria-label={`${table.name}, ${occupied} de ${table.capacity}`}
+                    onClick={() => showTable(table.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleDrop(e, table.id)}
+                  >
+                    <strong>
+                      {table.id === 'couple'
+                        ? 'Pareja'
+                        : table.name.replace('Mesa ', '')}
+                    </strong>
+                    <small>{full ? 'llena' : `${free} libre${free === 1 ? '' : 's'}`}</small>
+                  </button>
+                ))}
+              </div>
+              {boardTables.map(renderTablePanel)}
+            </>
+          ) : (
+            <div className="mesa-browser">
+              <div className="mesa-browser-head">
+                <span className="mesa-browser-titles">
+                  <strong>Mesas</strong>
+                  <small>Toca una para abrir sus lugares</small>
+                </span>
+                <button
+                  className="button text-button"
+                  onClick={() => setMobilePanel(true)}
+                >
+                  <Users size={15} />
+                  Invitados
+                </button>
+              </div>
+              <div className="mesa-strip">
+                {strip.map(({ table, occupied, free, full }) => (
+                  <button
+                    key={table.id}
+                    data-table-id={table.id}
+                    className={`mesa-card ${full ? 'is-full' : ''} ${occupied === 0 ? 'is-empty' : ''}`}
+                    onClick={() => showTable(table.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleDrop(e, table.id)}
+                  >
+                    <span className="mc-top">
+                      <span className="mc-num">
+                        {table.id === 'couple' ? (
+                          <Heart size={17} />
+                        ) : (
+                          table.name.replace('Mesa ', '')
+                        )}
+                      </span>
+                      <span className="mc-cap">
+                        {occupied}
+                        <small>/{table.capacity}</small>
+                      </span>
+                    </span>
+                    <span className="mc-dots">
+                      {Array.from({ length: table.capacity }, (_, i) => (
+                        <i key={i} className={i < occupied ? '' : 'free'} />
+                      ))}
+                    </span>
+                    <span className="mc-label">
+                      {full
+                        ? 'Completa'
+                        : `${free} ${free === 1 ? 'libre' : 'libres'}`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div
+                data-table-id="none"
+                className={`unassigned-drop mesa-unassigned ${dropTarget === 'none' ? 'drop-active' : ''}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDropTarget('none');
+                }}
+                onDragLeave={() => setDropTarget(null)}
+                onDrop={(e) => handleDrop(e, null)}
+              >
+                <span className="drop-icon">
+                  <UserRound size={16} />
+                </span>
+                <span>
+                  <strong>Sin mesa</strong>
+                  <small>
+                    {unassigned === 0
+                      ? 'Todos tienen lugar'
+                      : `${unassigned} ${unassigned === 1 ? 'persona' : 'personas'} por ubicar`}
+                  </small>
+                </span>
+              </div>
+            </div>
+          )}
         </section>
       </div>
       {dragging && (
@@ -1401,104 +1523,36 @@ export default function Home() {
           </button>
         </output>
       )}
-      <Dialog
-        open={tableDetailsOpen && !!focusedTable}
-        onOpenChange={setTableDetailsOpen}
-      >
-        <DialogContent className="table-detail-dialog" showCloseButton={false}>
+      <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
+        <DialogContent className="compare-dialog" showCloseButton={false}>
           <DialogClose className="dialog-close-button" aria-label="Cerrar">
             <X size={18} />
           </DialogClose>
-          <div className="table-detail-heading">
-            <div>
-              <DialogTitle>Información de {focusedTable?.name}</DialogTitle>
-              <DialogDescription>
-                Administra quién ocupa cada lugar de esta mesa.
-              </DialogDescription>
-            </div>
-            <button
-              className="button table-add-button"
-              onClick={() => openAddPerson(focusedTable?.id ?? null)}
-            >
-              <Plus size={15} />
-              <span>Agregar persona</span>
-            </button>
-          </div>
-          <div className="table-detail-list">
-            {focusedTable &&
-              Array.from({ length: focusedTable.capacity }, (_, seat) => {
-                const guest = focusedOccupants.find((g) => g.seat === seat);
-                return (
-                  <div
-                    className={`table-detail-row ${guest ? '' : 'is-vacant'}`}
-                    key={seat}
-                  >
-                    <span className="detail-seat-number">
-                      {String(seat + 1).padStart(2, '0')}
-                    </span>
-                    <span
-                      className={`avatar ${guest ? `tone-${toneIndex(guest.id)}` : ''}`}
-                    >
-                      {guest ? initials(guest.name) : <Plus size={14} />}
-                    </span>
-                    <span className="detail-guest-name">
-                      <strong>{guest?.name ?? 'Lugar disponible'}</strong>
-                      <small>Lugar {seat + 1}</small>
-                    </span>
-                    {guest ? (
-                      <span className="detail-actions">
-                        <button
-                          onClick={() => beginMove(guest.id)}
-                          aria-label={`Mover a ${guest.name}`}
-                          title="Mover a otra mesa"
-                        >
-                          <ArrowLeftRight size={15} />
-                          <span className="detail-action-label">Mover</span>
-                        </button>
-                        <button
-                          className="detail-remove"
-                          onClick={() => removeFromTable(guest.id)}
-                          aria-label={`Quitar a ${guest.name} de la mesa`}
-                          title="Quitar de la mesa"
-                        >
-                          <UserRoundMinus size={15} />
-                          <span className="detail-action-label">Quitar</span>
-                        </button>
-                        <button
-                          className="detail-edit"
-                          onClick={() => {
-                            setTableDetailsOpen(false);
-                            openGuest(guest);
-                          }}
-                          aria-label={`Editar a ${guest.name}`}
-                          title="Editar persona"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          className="detail-delete"
-                          onClick={() => requestDelete(guest.id)}
-                          aria-label={`Eliminar a ${guest.name} del evento`}
-                          title="Eliminar del evento"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        className="detail-add-slot"
-                        onClick={() =>
-                          openAddPerson(focusedTable?.id ?? null, seat)
-                        }
-                        aria-label={`Agregar una persona al lugar ${seat + 1}`}
-                      >
-                        <Plus size={15} />
-                        <span>Agregar aquí</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+          <DialogTitle>Comparar con otra mesa</DialogTitle>
+          <DialogDescription>
+            Se abre junto a la actual para pasar personas de una a otra.
+          </DialogDescription>
+          <div className="compare-grid">
+            {strip
+              .filter(({ table }) => !openTables.includes(table.id))
+              .map(({ table, occupied, free }) => (
+                <button
+                  key={table.id}
+                  className="compare-option"
+                  onClick={() => {
+                    showTable(table.id, true);
+                    setCompareOpen(false);
+                  }}
+                >
+                  <strong>{table.name}</strong>
+                  <small>
+                    {occupied}/{table.capacity} ·{' '}
+                    {free === 0
+                      ? 'completa'
+                      : `${free} ${free === 1 ? 'libre' : 'libres'}`}
+                  </small>
+                </button>
+              ))}
           </div>
         </DialogContent>
       </Dialog>
@@ -1547,6 +1601,13 @@ export default function Home() {
                 onChange={(e) => setAddPersonName(e.target.value)}
               />
             </div>
+            <label className="field-label" htmlFor="new-person-meal">Menú</label>
+            <select id="new-person-meal" className="meal-select" value={addPersonMeal}
+              onChange={(e) => setAddPersonMeal(e.target.value as Meal | 'pending')}>
+              {Object.entries(mealLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
             <span className="field-label" id="new-person-table-label">
               Mesa
             </span>
@@ -1620,7 +1681,7 @@ export default function Home() {
           </DialogClose>
           <DialogTitle>Un lugar para {active?.name}</DialogTitle>
           <DialogDescription>
-            Edita su nombre o elige la mesa en la que estará.
+            Edita su nombre, elige su menú o la mesa en la que estará.
           </DialogDescription>
           <form
             onSubmit={(e) => {
@@ -1641,6 +1702,13 @@ export default function Home() {
                 onChange={(e) => setEditName(e.target.value)}
               />
             </div>
+            <label className="field-label" htmlFor="guest-meal">Menú</label>
+            <select id="guest-meal" className="meal-select" value={editMeal}
+              onChange={(e) => setEditMeal(e.target.value as Meal | 'pending')}>
+              {Object.entries(mealLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
             <span className="field-label" id="table-label">
               Mesa
             </span>
@@ -1759,35 +1827,35 @@ export default function Home() {
           </DialogClose>
           <DialogTitle>Todo el mundo en su lugar</DialogTitle>
           <DialogDescription>
-            Tres formas sencillas de organizar la recepción.
+            El plano te ubica; las mesas abiertas son donde se edita.
           </DialogDescription>
           <div className="help-step">
             <LayoutGrid />
             <div>
-              <strong>Enfoca una mesa</strong>
+              <strong>Abre una mesa</strong>
               <p>
-                Toca una mesa o una persona para ver todos los nombres de ese
-                grupo.
+                Toca una mesa del plano y sus lugares se abren al lado, con los
+                nombres completos.
               </p>
             </div>
           </div>
           <div className="help-step">
             <ArrowLeftRight />
             <div>
-              <strong>Mueve con un toque o arrastre</strong>
+              <strong>Abre una segunda y pasa gente</strong>
               <p>
-                Toca un nombre y luego su destino. También puedes arrastrarlo
-                sobre otra mesa o persona.
+                «Comparar» deja dos mesas abiertas a la vez. Arrastra un nombre
+                de una a la otra, o tócalo y luego toca su nuevo lugar.
               </p>
             </div>
           </div>
           <div className="help-step">
-            <Pencil />
+            <UserRoundMinus />
             <div>
-              <strong>Abre el detalle</strong>
+              <strong>Intercambia o deja sin mesa</strong>
               <p>
-                Con la mesa enfocada, tócala de nuevo para revisar y editar cada
-                lugar.
+                Al tocar a alguien que ya está sentado, los dos intercambian
+                lugares. «Sin mesa» lo libera sin borrarlo del evento.
               </p>
             </div>
           </div>

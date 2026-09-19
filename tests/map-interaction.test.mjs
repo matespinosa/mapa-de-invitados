@@ -11,117 +11,55 @@ registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { expandTable, fitRoom, roomGeometry, revealAxis } =
+const { fitRoom, roomGeometry, revealAxis } =
   await import('../app/map-layout.ts');
 const { captureGuestPointer, watchGuestDrag } =
   await import('../app/guest-drag.ts');
-const { tables, initialGuests, moveGuest, validateGuests } =
+const { tables, moveGuest, validateGuests, initialGuests } =
   await import('../app/seating.ts');
 
 const close = (actual, expected) =>
   assert.ok(Math.abs(actual - expected) < 0.001, `${actual} ≠ ${expected}`);
-const overlaps = (a, b) =>
-  a.left < b.left + b.width - 0.01 &&
-  a.left + a.width > b.left + 0.01 &&
-  a.top < b.top + b.height - 0.01 &&
-  a.top + a.height > b.top + 0.01;
 
-test('expanded seats retain their table center, order and orientation without overlap', () => {
+test('the whole room fits every viewport at fit zoom and stays centred', () => {
   for (const width of [286, 326, 358, 390, 768, 1120]) {
-    for (const table of tables) {
-      const view = { width, height: 400 };
-      const layout = expandTable(table, initialGuests, view);
-      assert.equal(layout.seats.length, table.capacity);
-      close(layout.surface.left + layout.surface.width / 2, layout.width / 2);
-      close(layout.surface.top + layout.surface.height / 2, layout.height / 2);
-      assert.ok(layout.width <= width - 24);
-      for (const [index, seat] of layout.seats.entries()) {
-        assert.ok(seat.height >= 44);
-        assert.ok(seat.left >= 0 && seat.top >= 0);
-        assert.ok(seat.left + seat.width <= layout.width + 0.01);
-        assert.ok(seat.top + seat.height <= layout.height + 0.01);
-        assert.ok(
-          !overlaps(seat, layout.surface),
-          `${table.id}:${index} overlaps its table`,
-        );
-        for (const other of layout.seats.slice(index + 1))
-          assert.ok(!overlaps(seat, other));
-      }
-      if (table.horizontal) {
-        assert.ok(layout.seats[0].left < layout.surface.left);
-        assert.ok(layout.seats[9].left > layout.surface.left);
-        assert.ok(layout.seats[1].top < layout.surface.top);
-        assert.ok(layout.seats[5].top > layout.surface.top);
-      } else if (table.id !== 'couple') {
-        assert.ok(layout.seats[0].top < layout.surface.top);
-        assert.ok(layout.seats[9].top > layout.surface.top);
-        assert.ok(layout.seats[1].left < layout.surface.left);
-        assert.ok(layout.seats[5].left > layout.surface.left);
+    for (const height of [218, 400, 680]) {
+      const view = { width, height };
+      const fit = fitRoom(view);
+      assert.ok(960 * fit <= width - 24 + 0.01);
+      assert.ok(760 * fit <= height - 24 + 0.01);
+      for (const zoom of [0.75, 1, 1.5, 2]) {
+        const scale = fit * zoom;
+        const room = roomGeometry(view, scale);
+        // The scroll area never shrinks below the viewport, and the room sits
+        // centred inside it, so opening a table panel cannot crop the plan.
+        assert.ok(room.width >= width && room.height >= height);
+        close(room.left, (room.width - 960 * scale) / 2);
+        close(room.top, (room.height - 760 * scale) / 2);
+        assert.ok(room.left >= 0 && room.top >= 0);
       }
     }
   }
 });
 
-test('every edge table remains reachable and fits in phone and desktop views at every zoom', () => {
-  for (const width of [286, 326, 358, 390, 768, 1120]) {
+test('every table stays reachable inside the scroll area at every zoom', () => {
+  for (const width of [286, 390, 768, 1120]) {
     for (const height of [218, 400, 680]) {
       for (const zoom of [0.75, 1, 1.5, 2]) {
         const view = { width, height };
-        assert.ok(960 * fitRoom(view) <= width - 24 + 0.01);
+        const scale = fitRoom(view) * zoom;
+        const room = roomGeometry(view, scale);
         for (const table of tables) {
-          const scale = fitRoom(view) * zoom;
-          const layout = expandTable(table, initialGuests, view);
-          const room = roomGeometry(view, scale, table, layout);
-          const bounds = room.focus;
-          // The physical table remains at the same map coordinate.
-          close((bounds.left + layout.width / 2 - room.left) / scale, table.x);
-          close((bounds.top + layout.height / 2 - room.top) / scale, table.y);
-          const left = revealAxis(
-            0,
-            bounds.left,
-            bounds.width,
-            width,
-            room.width,
-          );
-          const top = revealAxis(
-            0,
-            bounds.top,
-            bounds.height,
-            height,
-            room.height,
-          );
-          assert.ok(bounds.left - left >= 12 - 0.01);
-          assert.ok(bounds.left + bounds.width - left <= width - 12 + 0.01);
-          assert.ok(bounds.top - top >= 12 - 0.01);
-          if (bounds.height <= height - 24)
-            assert.ok(bounds.top + bounds.height - top <= height - 12 + 0.01);
-          else assert.ok(bounds.top + bounds.height <= room.height - 12 + 0.01);
+          const centerX = room.left + table.x * scale;
+          const centerY = room.top + table.y * scale;
+          const left = revealAxis(0, centerX, width, room.width);
+          const top = revealAxis(0, centerY, height, room.height);
+          // Scrolling there always brings the table inside the viewport.
+          assert.ok(centerX - left >= 0 && centerX - left <= width);
+          assert.ok(centerY - top >= 0 && centerY - top <= height);
+          assert.ok(left >= 0 && left <= Math.max(0, room.width - width));
+          assert.ok(top >= 0 && top <= Math.max(0, room.height - height));
         }
-      }
-    }
-  }
-});
-
-test('focused tables reserve room for their controls and grow for long guest names', () => {
-  for (const width of [286, 358, 480, 840]) {
-    for (const table of tables) {
-      const view = { width, height: 400 };
-      const normal = expandTable(table, initialGuests, view);
-      if (table.horizontal) assert.ok(normal.surface.height >= 104);
-      else assert.ok(normal.surface.width >= 88);
-      const longNames = Array.from({ length: table.capacity }, (_, seat) => ({
-        id: `long-${seat}`,
-        name: 'María Alejandra '.repeat(4).trim(),
-        tableId: table.id,
-        seat,
-      }));
-      const expanded = expandTable(table, longNames, view);
-      assert.ok(expanded.height > normal.height);
-      assert.ok(expanded.width <= width - 24);
-      for (const [index, seat] of expanded.seats.entries()) {
-        assert.ok(!overlaps(seat, expanded.surface));
-        for (const other of expanded.seats.slice(index + 1))
-          assert.ok(!overlaps(seat, other));
       }
     }
   }
@@ -287,7 +225,7 @@ test('touch drag transfers a guest to another table exactly once and suppresses 
 });
 
 test('dragging onto a person swaps places both within and between tables', () => {
-  for (const tableId of ['t1', 't3']) {
+  for (const tableId of ['t1', 't2']) {
     const env = setup();
     const other = env.guests.find((g) => g.tableId === tableId && g.seat === 1);
     env.start();
@@ -305,7 +243,7 @@ test('dragging onto a person swaps places both within and between tables', () =>
 test('a full table requires a seat choice and never silently displaces someone', () => {
   const env = setup();
   env.start();
-  env.target('t3');
+  env.target('t2');
   env.send('pointermove', 230, 240);
   env.send('pointerup', 230, 240);
   assert.ok(env.calls.drops[0].error);

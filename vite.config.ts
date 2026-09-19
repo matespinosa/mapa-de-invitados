@@ -50,6 +50,18 @@ export default defineConfig(async () => {
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
     plugins: [
+      {
+        name: 'vinext-client-env-dev-fix',
+        enforce: 'pre',
+        apply: 'serve',
+        transform(code: string, id: string) {
+          if (!id.includes('/node_modules/vinext/dist/')) return;
+          return code
+            .replaceAll('process.env.__NEXT_VERSION', JSON.stringify('1.0.0-beta.5'))
+            .replaceAll('process.env.__NEXT_APP_NAV_FAIL_HANDLING', 'false')
+            .replaceAll('process.env.__VINEXT_HAS_CLIENT_REWRITES', '"false"');
+        },
+      },
       vinext(),
       sites(),
       cloudflare({

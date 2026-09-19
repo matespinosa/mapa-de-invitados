@@ -1,66 +1,36 @@
-# Design QA · En su lugar
+# Revisión del arrastre de puestos — 2026-09-19
 
 final result: passed
 
-## Visual truth and scope
+Alcance: restaurar interacción en el plano existente, conservando su diseño; no recrear la captura ni rediseñar la aplicación.
 
-- Source visual truth: `public/plano-original.jpg` (945 × 713 pixels).
-- The user requested a modern React app based on the reception layout, rather than a pixel copy of the raster photo. The source governs furniture grouping, relative positions, fixed zones and guest names; app chrome, colors, type and interactive seat controls are intentional adaptations.
-- The 10 tables, central empty table, bar between the two upper tables, two W.C. zones, five columns, central cake, and couple table at the right are preserved. Table capacity is interpreted as 10 each, plus 2 for the couple (102 total); 89 transcribed names and one unnamed guest make 90 records. Transcription is explicitly marked approximate and editable.
+Referencia: `/var/folders/7y/jrz7vkm90jz146xmd_5fttdh0000gn/T/codex-clipboard-6025488c-f3e0-4075-b250-63d9cbef2518.png` (1344 × 1026, recorte del plano).
+Implementación: http://localhost:5173/, capturas del navegador incluidas en la conversación, escritorio 1280 × 900 y móvil 390 × 844. La referencia es un recorte ampliado: comparación de la región del plano por proporciones, no una comparación píxel a píxel de la página completa. No se guardó archivo de captura adicional.
 
-## Evidence
+## Hallazgos y corrección
 
-- Desktop initial: `qa/desktop-first.png`, 1280 × 720 CSS/pixel viewport, scale 1.
-- Desktop final full view: `qa/desktop-final.png`, 1280 × 720 CSS/pixel viewport, scale 1, overview 100%, 89 seated and 1 unassigned.
-- Focused desktop detail: `qa/desktop-detail.png`, 1280 × 720 CSS/pixel viewport, app zoom 175%. Shows the bar, two terrace tables and four middle tables, including empty table 04. The canvas intentionally scrolls at this zoom while the toolbar and zoom controls remain visible.
-- Responsive: `qa/mobile-plan.png`, `qa/mobile-guests.png`, `qa/mobile-dialog.png`, 390 × 844 CSS/pixel viewport, scale 1.
-- Full source and full implementation were emitted together in one comparison input after fixes. A second combined input placed the source and the 175% detail capture together. This is a semantic floor-plan comparison, not a pixel-font or photographic texture comparison; no false pixel-level fidelity is claimed.
-- The responsive viewport override was reset before handoff.
+- Corregido: puestos sin eventos y con `pointer-events: none` impedían comenzar un arrastre o apuntar a un puesto exacto. Ahora son botones con captura del puntero y destino individual.
+- Corregido: `touch-action: manipulation` permitía al navegador cancelar el arrastre para desplazar la página. Los puestos ocupados reservan el gesto para mover; el fondo mantiene desplazamiento.
+- Corregido: las mesas llenas se atenuaban aunque sus puestos permiten intercambios.
 
-## Findings and comparison history
+## Verificación
 
-1. **P2, initial canvas / app height:** initial fixed minimum panel height pushed the bottom tables and controls below the viewport (`desktop-first.png`). Fixed with a compact header, explicit viewport-relative workspace sizing, and fit based on both available width and height. The final capture exposes every table and the persistent controls.
-2. **P2, text hierarchy:** early overview table text and secondary list labels were too faint/small. Enlarged table numbers/counts and seat initials, shortened table labels to their number, increased guest names and metadata size, strengthened foreground colors, retained readable full names in the list and edit dialog, and verified detail at 175% zoom.
-3. **P1, drag interaction:** initial native HTML drag did not change assignments under the in-app browser test. Replaced activation with thresholded pointer movement and explicit drop hit testing. Verified actual row-to-table drag and seat-to-seat swap visually through the changed accessible labels and counts. Added a floating name preview and drop highlighting. Touch users use the verified tap-and-select flow; the guest list retains native touch scrolling.
-4. **P2, dialog fit on small screens:** added viewport-bound dialog maximum height and scrolling to keep editing usable in shorter viewports. Mobile list and edit controls were captured at 390 × 844. Close buttons are labeled in Spanish.
+- Navegador de escritorio: Daniela de Mesa 01/lugar 1 a Mesa 04/lugar 1; intercambio con Juan David en Mesa 02/lugar 1; Deshacer después de cada operación. Resultados visibles correctos.
+- Vista móvil: selección y colocación con dos pulsaciones; Deshacer al terminar. Distribución original conservada.
+- Pruebas automatizadas: 24 aprobadas, incluyendo puntero táctil, intercambio, cancelación, múltiples dedos y desplazamiento en bordes. TypeScript y compilación aprobados.
+- Consola del navegador: sin errores registrados.
+- Límite de verificación: no se probó el gesto en un teléfono físico; cobertura táctil mediante pruebas del controlador.
 
-No actionable P0/P1/P2 findings remain in the tested states.
+## Revisión visual del cambio
 
-## Required fidelity surfaces
+Tipografía, paleta, radios, distribución de mesas, iniciales e iconos existentes conservados. El botón elimina padding nativo y hereda la fuente para mantener la geometría de cada puesto. No se añadieron imágenes. El estado enfocado ahora es visible y las mesas completas siguen legibles durante el movimiento. El mapa móvil conserva zoom y desplazamiento para alcanzar puestos pequeños.
 
-- **Fonts / typography:** clean system sans serif for the interface. Legible hierarchy in the list and form; small initials are an overview marker, with full accessible names, tooltips, list details and zoom. The photo's rotated name tags are intentionally represented as interactive seat initials.
-- **Spacing / layout:** source spatial grouping retained; tabletops and fixed zones do not overlap. Whole-room fit, scrollable zoomed canvas, and fixed plan controls verified. The mobile list opens as a full-screen panel to keep names readable.
-- **Color / tokens:** intentional ciruela/lilac interface theme with semantic occupied/available/selected states, warmer cake/bar and couple accents. The photograph's brown furniture and gray tiles are not treated as a mandatory UI palette.
-- **Image quality / assets:** the supplied original JPG is reused without alteration and renders in the reference dialog. Furniture/seat controls are a functional editable diagram, not a replacement raster illustration. Interface icons use the installed Lucide library.
-- **Copy / content:** Spanish labels; 90 guests; names editable and transcription caveat visible in the reference. No invented date or venue name. Local-only saving clearly described in the header/help.
+No quedan hallazgos bloqueantes dentro del alcance de esta corrección.
 
-## Interaction verification
+## Revisión posterior: claridad móvil y selección
 
-- Filter to the single unassigned guest, open editor, select table 04, save: 90 seated / 0 unassigned and the empty-list success state shown.
-- Undo: original 89 seated / 1 unassigned restored.
-- Search Vicente: one matching guest and highlighted seat.
-- Pointer drag Samuel from list to table 04: origin 9/10, target 1/10 verified.
-- Pointer swap Samuel with Camilo: both reciprocal seat labels verified.
-- Reload: the swapped assignments remained, proving device-local persistence.
-- Restore the source assignments through inverse pointer actions.
-- Mobile: open/close guest list, open edit form, rename a guest, save, and undo; source name restored.
-- Zoom and fit controls changed view scale and reset it.
-- Original-photo dialog opens and displays the correct supplied image.
-- Browser console error check: empty error list in the final run.
-- TypeScript check and final production build passed.
-- Core logic assertions passed: 90 unique valid guests, 102 places, assignment, occupied-seat swap, full-table rejection, unassign, invalid guest/seat rejection, duplicate draft rejection.
+Referencia adicional: captura del usuario `Downloads/En su lugar · Organiza tu recepción.png`, 1206 × 2622, incluyendo controles de Safari. Verificación de la aplicación compilada en navegador a 402 × 780 CSS px (sin controles de Safari) y escritorio a 1280 × 900. Capturas disponibles en la conversación. Se comparó la región de la aplicación: la diferencia de encuadre impide una comparación píxel a píxel.
 
-## Remaining limits / P3 follow-up
+Se corrigieron el solapamiento de «Sin mesa» con Cancelar, el panel que tapaba el mapa en modo «Solo mapa» y la selección casi invisible. El puesto seleccionado ahora tiene fondo sólido, aro y animación breve, con alternativa sin animación según la preferencia del sistema. El aviso identifica a la persona y explica destinos vacíos y ocupados; se eliminó el toast redundante. En la vista móvil inicial las mesas quedan debajo del mapa, sin superposición fija.
 
-- Test coverage used the Codex in-app browser; no claim of physical mobile Safari/Android device testing or a full accessibility audit.
-- The whole-room overview is intentionally compact. Use zoom, the full-name guest list or table selection for detailed placement.
-- No cross-device collaboration: drafts remain in the current browser. History is session-only.
-- Guest name spelling and any implied seating capacity should be confirmed against the event's actual guest list.
-
-## Implementation checklist
-
-- [x] Source layout preserved and photo available.
-- [x] Primary assignment journey verified through actual UI interaction.
-- [x] Responsive list and edit dialog checked.
-- [x] P0/P1/P2 findings corrected and visual evidence captured again.
-- [x] Local preview retained for the user.
+Prueba visible: seleccionar Blanca Quintero, moverla a Mesa 04/lugar 1 y deshacer. Distribución conservada. Cancelación y salida del modo mapa verificadas. Tipografía, iniciales y paleta existentes conservadas; controles separados y zoom visible. TypeScript y compilación aprobados; sin errores de consola en la vista compilada. El servidor dev activo conserva estilos anteriores: requiere reinicio para servir todos los cambios. No se verificó Safari físico desde este entorno.

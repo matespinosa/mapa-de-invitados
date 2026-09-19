@@ -6,9 +6,10 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
+    "dev": "node scripts/dev.mjs",
     "dev:lan": "vinext dev --hostname 0.0.0.0",
     "build": "vinext build",
+    "preview": "node scripts/serve-static.mjs",
     "prepare:pages": "node scripts/prepare-github-pages.mjs",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",

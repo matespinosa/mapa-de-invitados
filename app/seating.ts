@@ -1,6 +1,24 @@
+import roster from './guest-roster';
+
+export type Meal = 'chicken' | 'beef' | 'vegetarian';
+export const mealLabels = {
+  pending: 'Por confirmar',
+  chicken: 'Pollo',
+  beef: 'Carne',
+  vegetarian: 'Vegetariano',
+} as const;
+export const mealLabel = (meal: Meal | null | undefined) =>
+  mealLabels[meal ?? 'pending'];
+export function mealSummary(guests: readonly Guest[]) {
+  const counts = { chicken: 0, beef: 0, vegetarian: 0, pending: 0 };
+  for (const guest of guests) counts[guest.meal ?? 'pending']++;
+  return counts;
+}
+
 export type Guest = {
   id: string;
   name: string;
+  meal?: Meal | null;
   tableId: string | null;
   seat: number | null;
 };
@@ -31,127 +49,8 @@ export const tables: Table[] = [
   })),
   { id: 'couple', name: 'Mesa de la pareja', capacity: 2, x: 755, y: 472 },
 ];
-const names: Record<string, string[]> = {
-  t1: [
-    'Daniela',
-    'Samuel',
-    'Vicente',
-    'Luis',
-    'Tefa',
-    'Mariana',
-    'Blanca',
-    'Anaid',
-    'Julio',
-    'Betty',
-  ],
-  t2: [
-    'Juan David',
-    'Gary',
-    'Jessica',
-    'Camila',
-    'Nicolás',
-    'Elías',
-    'Fernanda',
-    'Dayana',
-  ],
-  t3: [
-    'Daniel',
-    'Camilo',
-    'Darío',
-    'Marlen',
-    'Cristian',
-    'María José',
-    'Milena',
-    'Germán',
-    'Geraldín',
-    'Samuel',
-  ],
-  t4: [],
-  t5: [
-    'Sebastián',
-    'Luisa',
-    'Valentina',
-    'Alicia',
-    'Juan José',
-    'Karen',
-    'Cristian',
-    'Sandra',
-    'Juanita',
-  ],
-  t6: [
-    'Raúl',
-    'Liliana',
-    'Daniela',
-    'Sara',
-    'Miguel',
-    'Jaime',
-    'Aleja',
-    'Sabine',
-    'Malú',
-    'Adriana',
-  ],
-  t7: [
-    'Lucho',
-    'Nubia',
-    'Sebastián',
-    'Santiago',
-    'Martín',
-    'Giovanny',
-    'Diana',
-    'Saray',
-    'Pablito',
-    'Doña Cecilia',
-  ],
-  t8: [
-    'Javier',
-    'Clarena',
-    'Nicolás',
-    'Javier',
-    'Daniela',
-    'Elizabeth',
-    'Tía Maruja',
-    'Juan David',
-    'Rosita',
-    'Carmen',
-  ],
-  t9: [
-    'Bonifacio',
-    'Viviana',
-    'Nicolás',
-    'Marce',
-    'Rigoberto',
-    'Dora',
-    'Jessica',
-    'Daniel',
-    'Carolina',
-    'Miguel',
-  ],
-  t10: [
-    'José',
-    'Andrea',
-    'Gio',
-    'Blanca',
-    'Ricardo',
-    'Gladys',
-    'Johana',
-    'Horacio',
-    'Luz Dary',
-    'Hijo',
-  ],
-  couple: ['Mateo', 'Julieth'],
-};
-export const initialGuests: Guest[] = Object.entries(names)
-  .flatMap(([tableId, list]) =>
-    list.map((name, seat) => ({ name, tableId, seat })),
-  )
-  .map((g, i) => ({ ...g, id: `g${i + 1}` }));
-while (initialGuests.length < 90)
-  initialGuests.push({
-    id: `g${initialGuests.length + 1}`,
-    name: `Invitado ${initialGuests.length + 1}`,
-    tableId: null,
-    seat: null,
-  });
+// Transcribed from mesas 1.pdf; full names and menus from Confirmacion.pdf.
+export const initialGuests: Guest[] = roster;
 
 export function validateGuests(value: unknown): value is Guest[] {
   if (!Array.isArray(value)) return false;
@@ -166,7 +65,10 @@ export function validateGuests(value: unknown): value is Guest[] {
       ids.has(g.id) ||
       typeof g.name !== 'string' ||
       !g.name.trim() ||
-      g.name.length > 70
+      g.name.length > 70 ||
+      (g.meal !== undefined &&
+        g.meal !== null &&
+        !['chicken', 'beef', 'vegetarian'].includes(g.meal))
     )
       return false;
     ids.add(g.id);
