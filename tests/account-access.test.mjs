@@ -34,12 +34,19 @@ test('anything that is not an address matches nothing', () => {
   }
 });
 
-test('an entry left without an address never lets anyone in', () => {
-  const pending = allowedAccounts.filter((entry) => !entry.email);
-  assert.ok(pending.length > 0, 'this test guards the placeholder entries');
+test('an empty address never lets anyone in', () => {
   assert.equal(findAllowedAccount(''), null);
   assert.equal(findAllowedAccount(null), null);
   assert.equal(findAllowedAccount('   '), null);
+});
+
+test('Juliet can enter with her Google address', () => {
+  assert.equal(findAllowedAccount('jusaenz14@gmail.com')?.name, 'Juliet');
+  assert.equal(findAllowedAccount('ju.saenz14+bodas@gmail.com')?.name, 'Juliet');
+  assert.deepEqual(checkAccess(google('jusaenz14@gmail.com')), {
+    status: 'allowed',
+    name: 'Juliet',
+  });
 });
 
 test('the list recognises its people through gmail spelling variants', () => {

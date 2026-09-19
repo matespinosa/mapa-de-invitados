@@ -12,8 +12,7 @@ export type AllowedAccount = {
 
 export const allowedAccounts: AllowedAccount[] = [
   { email: 'matespinosa09@gmail.com', name: 'Mateo' },
-  // Replace the empty value with Juliet's Google address so she can enter.
-  { email: '', name: 'Juliet' },
+  { email: 'jusaenz14@gmail.com', name: 'Juliet' },
 ];
 
 export const GOOGLE_PROVIDER = 'google.com';

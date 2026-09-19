@@ -9,11 +9,11 @@ La lista está en [`app/allowed-accounts.ts`](../app/allowed-accounts.ts):
 ```ts
 export const allowedAccounts: AllowedAccount[] = [
   { email: 'matespinosa09@gmail.com', name: 'Mateo' },
-  { email: '', name: 'Juliet' },
+  { email: 'jusaenz14@gmail.com', name: 'Juliet' },
 ];
 ```
 
-Para habilitar a alguien, escribe su correo de Google en `email`. **Una entrada con `email` vacío no deja entrar a nadie**, así que Juliet no podrá abrir el plano hasta que se complete el suyo. El `name` solo se usa para el saludo mientras Google no haya dado un nombre de perfil.
+Para habilitar a alguien, escribe su correo de Google en `email`. **Una entrada con `email` vacío no deja entrar a nadie.** El `name` solo se usa para el saludo mientras Google no haya dado un nombre de perfil.
 
 Una cuenta llega al organizador cuando cumple las tres condiciones:
 
